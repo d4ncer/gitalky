@@ -103,20 +103,20 @@ mod tests {
 
         // Initialize git repo
         Command::new("git")
-            .args(&["init"])
+            .args(["init"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
 
         // Configure git
         Command::new("git")
-            .args(&["config", "user.name", "Test User"])
+            .args(["config", "user.name", "Test User"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.email", "test@example.com"])
+            .args(["config", "user.email", "test@example.com"])
             .current_dir(&repo_path)
             .output()
             .unwrap();

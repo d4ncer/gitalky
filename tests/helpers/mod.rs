@@ -10,20 +10,20 @@ pub fn create_test_repo() -> (TempDir, PathBuf) {
 
     // Initialize git repo
     Command::new("git")
-        .args(&["init"])
+        .args(["init"])
         .current_dir(&repo_path)
         .output()
         .expect("Failed to init git repo");
 
     // Configure git
     Command::new("git")
-        .args(&["config", "user.name", "Test User"])
+        .args(["config", "user.name", "Test User"])
         .current_dir(&repo_path)
         .output()
         .expect("Failed to set git user.name");
 
     Command::new("git")
-        .args(&["config", "user.email", "test@example.com"])
+        .args(["config", "user.email", "test@example.com"])
         .current_dir(&repo_path)
         .output()
         .expect("Failed to set git user.email");
@@ -37,13 +37,13 @@ pub fn create_commit(repo_path: &PathBuf, file: &str, content: &str, message: &s
     fs::write(&file_path, content).expect("Failed to write file");
 
     Command::new("git")
-        .args(&["add", file])
+        .args(["add", file])
         .current_dir(repo_path)
         .output()
         .expect("Failed to add file");
 
     Command::new("git")
-        .args(&["commit", "-m", message])
+        .args(["commit", "-m", message])
         .current_dir(repo_path)
         .output()
         .expect("Failed to commit");

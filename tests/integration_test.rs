@@ -89,7 +89,7 @@ fn test_staged_files() {
     fs::write(repo_path.join("staged.txt"), "staged content").expect("Failed to write file");
 
     Command::new("git")
-        .args(&["add", "staged.txt"])
+        .args(["add", "staged.txt"])
         .current_dir(&repo_path)
         .output()
         .expect("Failed to stage file");
@@ -151,7 +151,7 @@ fn test_stash_operations() {
     fs::write(repo_path.join("file.txt"), "modified").expect("Failed to modify file");
 
     Command::new("git")
-        .args(&["stash", "push", "-m", "WIP: test stash"])
+        .args(["stash", "push", "-m", "WIP: test stash"])
         .current_dir(&repo_path)
         .output()
         .expect("Failed to stash");
@@ -174,7 +174,7 @@ fn test_detached_head_state() {
 
     // Get first commit hash
     let output = Command::new("git")
-        .args(&["log", "--format=%H", "--reverse"])
+        .args(["log", "--format=%H", "--reverse"])
         .current_dir(&repo_path)
         .output()
         .expect("Failed to get log");
@@ -188,7 +188,7 @@ fn test_detached_head_state() {
 
     // Checkout first commit (detached HEAD)
     Command::new("git")
-        .args(&["checkout", &first_commit])
+        .args(["checkout", &first_commit])
         .current_dir(&repo_path)
         .output()
         .expect("Failed to checkout commit");
@@ -209,7 +209,7 @@ fn test_merge_in_progress_detection() {
 
     // Create a branch
     Command::new("git")
-        .args(&["checkout", "-b", "feature"])
+        .args(["checkout", "-b", "feature"])
         .current_dir(&repo_path)
         .output()
         .expect("Failed to create branch");
@@ -219,7 +219,7 @@ fn test_merge_in_progress_detection() {
 
     // Go back to main
     Command::new("git")
-        .args(&["checkout", "main"])
+        .args(["checkout", "main"])
         .current_dir(&repo_path)
         .output()
         .expect("Failed to checkout main");
@@ -229,7 +229,7 @@ fn test_merge_in_progress_detection() {
 
     // Attempt merge (will fail with conflict)
     let _ = Command::new("git")
-        .args(&["merge", "feature"])
+        .args(["merge", "feature"])
         .current_dir(&repo_path)
         .output();
 
@@ -261,14 +261,14 @@ fn test_upstream_tracking() {
 
     // Create a fake remote branch by creating another branch
     Command::new("git")
-        .args(&["branch", "fake-remote"])
+        .args(["branch", "fake-remote"])
         .current_dir(&repo_path)
         .output()
         .expect("Failed to create branch");
 
     // Set up tracking
     Command::new("git")
-        .args(&["branch", "--set-upstream-to=fake-remote"])
+        .args(["branch", "--set-upstream-to=fake-remote"])
         .current_dir(&repo_path)
         .output()
         .expect("Failed to set upstream");
@@ -299,7 +299,7 @@ fn test_mixed_staged_and_unstaged() {
     // Modify and stage
     fs::write(repo_path.join("file.txt"), "staged version").expect("Failed to write file");
     Command::new("git")
-        .args(&["add", "file.txt"])
+        .args(["add", "file.txt"])
         .current_dir(&repo_path)
         .output()
         .expect("Failed to stage");
