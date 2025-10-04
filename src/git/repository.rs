@@ -54,6 +54,7 @@ impl Repository {
     /// Query the current repository state
     pub fn state(&self) -> Result<RepositoryState> {
         let current_branch = self.current_branch()?;
+        let upstream = self.upstream_info(&current_branch)?;
         let status_entries = self.status()?;
         let commits = self.recent_commits(10)?;
         let stashes = self.stash_list()?;
@@ -82,6 +83,7 @@ impl Repository {
 
         Ok(RepositoryState {
             current_branch,
+            upstream,
             staged_files: staged,
             unstaged_files: unstaged,
             untracked_files: untracked,
@@ -102,6 +104,51 @@ impl Repository {
                     Ok(None)
                 } else {
                     Ok(Some(branch.to_string()))
+                }
+            }
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Get upstream tracking info for the current branch
+    fn upstream_info(&self, branch: &Option<String>) -> Result<Option<UpstreamInfo>> {
+        let branch_name = match branch {
+            Some(b) => b,
+            None => return Ok(None), // No branch (detached HEAD)
+        };
+
+        // Get upstream branch name
+        let cmd = format!(
+            "for-each-ref --format=%(upstream:short) refs/heads/{}",
+            branch_name
+        );
+        let upstream_branch = match self.executor.execute(&cmd) {
+            Ok(output) => {
+                let upstream = output.stdout.trim();
+                if upstream.is_empty() {
+                    return Ok(None); // No upstream configured
+                }
+                upstream.to_string()
+            }
+            Err(_) => return Ok(None),
+        };
+
+        // Get ahead/behind counts
+        let cmd = format!("rev-list --left-right --count {}...{}", branch_name, upstream_branch);
+        match self.executor.execute(&cmd) {
+            Ok(output) => {
+                let parts: Vec<&str> = output.stdout.split_whitespace().collect();
+                if parts.len() == 2 {
+                    let ahead = parts[0].parse::<usize>().unwrap_or(0);
+                    let behind = parts[1].parse::<usize>().unwrap_or(0);
+
+                    Ok(Some(UpstreamInfo {
+                        remote_branch: upstream_branch,
+                        ahead,
+                        behind,
+                    }))
+                } else {
+                    Ok(None)
                 }
             }
             Err(_) => Ok(None),
@@ -137,10 +184,19 @@ impl Repository {
     }
 }
 
+/// Upstream tracking information
+#[derive(Debug, Clone)]
+pub struct UpstreamInfo {
+    pub remote_branch: String,
+    pub ahead: usize,
+    pub behind: usize,
+}
+
 /// Represents the current state of a git repository
 #[derive(Debug, Clone)]
 pub struct RepositoryState {
     pub current_branch: Option<String>,
+    pub upstream: Option<UpstreamInfo>,
     pub staged_files: Vec<StatusEntry>,
     pub unstaged_files: Vec<StatusEntry>,
     pub untracked_files: Vec<StatusEntry>,

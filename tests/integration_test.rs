@@ -1,54 +1,10 @@
+mod helpers;
+
 use gitalky::{GitError, GitVersion, Repository};
+use helpers::{create_commit, create_test_repo};
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
-
-/// Helper to create a test git repository
-fn create_test_repo() -> (TempDir, PathBuf) {
-    let temp_dir = TempDir::new().unwrap();
-    let repo_path = temp_dir.path().to_path_buf();
-
-    // Initialize git repo
-    Command::new("git")
-        .args(&["init"])
-        .current_dir(&repo_path)
-        .output()
-        .expect("Failed to init git repo");
-
-    // Configure git
-    Command::new("git")
-        .args(&["config", "user.name", "Test User"])
-        .current_dir(&repo_path)
-        .output()
-        .expect("Failed to set git user.name");
-
-    Command::new("git")
-        .args(&["config", "user.email", "test@example.com"])
-        .current_dir(&repo_path)
-        .output()
-        .expect("Failed to set git user.email");
-
-    (temp_dir, repo_path)
-}
-
-/// Helper to create a commit
-fn create_commit(repo_path: &PathBuf, file: &str, content: &str, message: &str) {
-    let file_path = repo_path.join(file);
-    fs::write(&file_path, content).expect("Failed to write file");
-
-    Command::new("git")
-        .args(&["add", file])
-        .current_dir(repo_path)
-        .output()
-        .expect("Failed to add file");
-
-    Command::new("git")
-        .args(&["commit", "-m", message])
-        .current_dir(repo_path)
-        .output()
-        .expect("Failed to commit");
-}
 
 #[test]
 fn test_git_version_detection() {
@@ -294,6 +250,42 @@ fn test_executor_command_sanitization() {
 
     let result = executor.execute("status `whoami`");
     assert!(result.is_err());
+}
+
+#[test]
+fn test_upstream_tracking() {
+    let (_temp, repo_path) = create_test_repo();
+
+    // Create initial commit
+    create_commit(&repo_path, "file.txt", "content", "Initial commit");
+
+    // Create a fake remote branch by creating another branch
+    Command::new("git")
+        .args(&["branch", "fake-remote"])
+        .current_dir(&repo_path)
+        .output()
+        .expect("Failed to create branch");
+
+    // Set up tracking
+    Command::new("git")
+        .args(&["branch", "--set-upstream-to=fake-remote"])
+        .current_dir(&repo_path)
+        .output()
+        .expect("Failed to set upstream");
+
+    // Create a commit on main to be ahead
+    create_commit(&repo_path, "file2.txt", "content2", "Ahead commit");
+
+    let repo = Repository::new(&repo_path);
+    let state = repo.state().expect("Failed to get state");
+
+    // Should have upstream info
+    assert!(state.upstream.is_some());
+
+    let upstream = state.upstream.unwrap();
+    assert_eq!(upstream.remote_branch, "fake-remote");
+    assert_eq!(upstream.ahead, 1);  // 1 commit ahead
+    assert_eq!(upstream.behind, 0); // 0 commits behind
 }
 
 #[test]
