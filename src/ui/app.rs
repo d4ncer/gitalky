@@ -1,6 +1,7 @@
 use crate::error::Result;
 use crate::git::{Repository, RepositoryState};
 use crate::llm::{AnthropicClient, ContextBuilder, Translator};
+use crate::security::CommandValidator;
 use crate::ui::command_preview::CommandPreview;
 use crate::ui::input::{InputMode, InputWidget};
 use crate::ui::output::{CommandOutput, OutputDisplay};
@@ -29,6 +30,7 @@ enum AppState {
     Input,              // User typing query
     Translating,        // Waiting for LLM response
     Preview,            // Showing proposed command
+    ConfirmDangerous,   // Confirming dangerous operation
     Executing,          // Running command
     ShowingOutput,      // Displaying command output
 }
@@ -49,9 +51,14 @@ pub struct App {
     // LLM components
     translator: Option<Translator>,
 
+    // Security
+    validator: CommandValidator,
+
     // State management
     pending_query: Option<String>,
     error_message: Option<String>,
+    dangerous_op_type: Option<crate::security::DangerousOp>,
+    confirmation_input: String,
 }
 
 impl App {
@@ -86,8 +93,11 @@ impl App {
             preview: None,
             output: OutputDisplay::new(),
             translator,
+            validator: CommandValidator::new(),
             pending_query: None,
             error_message: None,
+            dangerous_op_type: None,
+            confirmation_input: String::new(),
         })
     }
 
@@ -191,6 +201,9 @@ impl App {
                     frame.render_widget(preview, chunks[2]);
                 }
             }
+            AppState::ConfirmDangerous => {
+                self.render_dangerous_confirmation(frame, chunks[2]);
+            }
             AppState::Executing => {
                 let executing = Paragraph::new("⚙️  Executing command...")
                     .style(Style::default().fg(Color::Cyan))
@@ -207,6 +220,7 @@ impl App {
             AppState::Input => "Enter: submit | q: quit",
             AppState::Translating => "Please wait...",
             AppState::Preview => "Enter: execute | E: edit | Esc: cancel",
+            AppState::ConfirmDangerous => "Type CONFIRM to execute | Esc: cancel",
             AppState::Executing => "Please wait...",
             AppState::ShowingOutput => "Any key to continue | q: quit",
         };
@@ -247,6 +261,7 @@ impl App {
         match self.state {
             AppState::Input => self.handle_input_state(key, terminal).await?,
             AppState::Preview => self.handle_preview_state(key, terminal).await?,
+            AppState::ConfirmDangerous => self.handle_confirm_dangerous_state(key, terminal).await?,
             AppState::ShowingOutput => self.handle_output_state(key),
             AppState::Translating | AppState::Executing => {
                 // No input allowed during these states
@@ -355,41 +370,77 @@ impl App {
     async fn execute_command<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()> {
         if let Some(ref preview) = self.preview {
             let command = preview.get_command().to_string();
-            self.state = AppState::Executing;
-            terminal.draw(|f| self.render(f))?; // Show "Executing..." message
 
-            // Strip "git " prefix if present - executor adds it
-            let command_for_executor = command.strip_prefix("git ").unwrap_or(&command);
+            // Validate command before execution
+            match self.validator.validate(&command) {
+                Ok(validated) => {
+                    // Check if dangerous operation requires confirmation
+                    if validated.is_dangerous {
+                        // Transition to confirmation state
+                        self.dangerous_op_type = validated.danger_type.clone();
+                        self.confirmation_input.clear();
+                        self.state = AppState::ConfirmDangerous;
+                        return Ok(());
+                    }
 
-            // Execute via git executor
-            let result = self.repo.executor().execute(command_for_executor);
-
-            match result {
-                Ok(output) => {
-                    let cmd_output = CommandOutput::new(
-                        command,
-                        output.stdout,
-                        output.stderr,
-                        output.exit_code,
-                    );
-                    self.output.set_output(cmd_output);
-
-                    // Refresh repo state after command
-                    let _ = self.refresh_repo_state();
+                    // Safe command - execute immediately
+                    self.execute_validated_command(terminal, &command).await?;
                 }
                 Err(e) => {
+                    // Validation failed - show error
                     let cmd_output = CommandOutput::new(
                         command,
                         String::new(),
-                        format!("Execution error: {}", e),
+                        format!("Command rejected by security validator: {}", e),
                         1,
                     );
                     self.output.set_output(cmd_output);
+                    self.state = AppState::ShowingOutput;
                 }
             }
-
-            self.state = AppState::ShowingOutput;
         }
+        Ok(())
+    }
+
+    async fn execute_validated_command<B: Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        command: &str,
+    ) -> io::Result<()> {
+        self.state = AppState::Executing;
+        terminal.draw(|f| self.render(f))?; // Show "Executing..." message
+
+        // Strip "git " prefix if present - executor adds it
+        let command_for_executor = command.strip_prefix("git ").unwrap_or(command);
+
+        // Execute via git executor
+        let result = self.repo.executor().execute(command_for_executor);
+
+        match result {
+            Ok(output) => {
+                let cmd_output = CommandOutput::new(
+                    command.to_string(),
+                    output.stdout,
+                    output.stderr,
+                    output.exit_code,
+                );
+                self.output.set_output(cmd_output);
+
+                // Refresh repo state after command
+                let _ = self.refresh_repo_state();
+            }
+            Err(e) => {
+                let cmd_output = CommandOutput::new(
+                    command.to_string(),
+                    String::new(),
+                    format!("Execution error: {}", e),
+                    1,
+                );
+                self.output.set_output(cmd_output);
+            }
+        }
+
+        self.state = AppState::ShowingOutput;
         Ok(())
     }
 
@@ -421,6 +472,117 @@ impl App {
     /// Check if the app should quit
     pub fn should_quit(&self) -> bool {
         self.should_quit
+    }
+
+    /// Handle key input in dangerous operation confirmation state
+    async fn handle_confirm_dangerous_state<B: Backend>(
+        &mut self,
+        key: KeyEvent,
+        terminal: &mut Terminal<B>,
+    ) -> io::Result<()> {
+        match key.code {
+            KeyCode::Char(c) => {
+                self.confirmation_input.push(c);
+            }
+            KeyCode::Backspace => {
+                self.confirmation_input.pop();
+            }
+            KeyCode::Enter => {
+                if self.confirmation_input == "CONFIRM" {
+                    // User confirmed - execute the command
+                    if let Some(ref preview) = self.preview {
+                        let command = preview.get_command().to_string();
+                        self.execute_validated_command(terminal, &command).await?;
+                    }
+                    self.confirmation_input.clear();
+                    self.dangerous_op_type = None;
+                } else {
+                    // Invalid confirmation - show error
+                    self.error_message = Some("Must type CONFIRM exactly".to_string());
+                }
+            }
+            KeyCode::Esc => {
+                // Cancel dangerous operation
+                self.confirmation_input.clear();
+                self.dangerous_op_type = None;
+                self.preview = None;
+                self.state = AppState::Input;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Render dangerous operation confirmation dialog
+    fn render_dangerous_confirmation(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::Wrap;
+
+        let danger_desc = match self.dangerous_op_type {
+            Some(crate::security::DangerousOp::ForcePush) => {
+                "⚠️  FORCE PUSH - This will overwrite remote history!"
+            }
+            Some(crate::security::DangerousOp::HardReset) => {
+                "⚠️  HARD RESET - This will permanently discard changes!"
+            }
+            Some(crate::security::DangerousOp::Clean) => {
+                "⚠️  CLEAN - This will permanently delete untracked files!"
+            }
+            Some(crate::security::DangerousOp::FilterBranch) => {
+                "⚠️  FILTER-BRANCH - This will rewrite git history!"
+            }
+            None => "⚠️  DANGEROUS OPERATION",
+        };
+
+        let command = self
+            .preview
+            .as_ref()
+            .map(|p| p.get_command())
+            .unwrap_or("");
+
+        let mut lines = vec![
+            Line::from(vec![Span::styled(
+                danger_desc,
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            )]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Command: ", Style::default().fg(Color::Yellow)),
+                Span::styled(command, Style::default().fg(Color::White)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(
+                    "Type CONFIRM to execute: ",
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::styled(
+                    &self.confirmation_input,
+                    Style::default().fg(Color::White),
+                ),
+                Span::styled("█", Style::default().fg(Color::Yellow)),
+            ]),
+        ];
+
+        // Show hint if input is wrong
+        if !self.confirmation_input.is_empty() && !self.confirmation_input.starts_with("CONFIRM") {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![Span::styled(
+                "(Must match exactly: CONFIRM)",
+                Style::default().fg(Color::Red),
+            )]));
+        }
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red))
+            .title("⚠️  DANGEROUS OPERATION - CONFIRM");
+
+        let paragraph = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+
+        frame.render_widget(paragraph, area);
     }
 }
 
