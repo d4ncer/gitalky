@@ -49,16 +49,29 @@ impl ContextBuilder {
             context.push_str("Detached HEAD state\n");
         }
 
-        // File counts
-        context.push_str(&format!(
-            "\nStaged files: {}\n",
-            state.staged_files.len()
-        ));
-        context.push_str(&format!("Unstaged files: {}\n", state.unstaged_files.len()));
-        context.push_str(&format!(
-            "Untracked files: {}\n",
-            state.untracked_files.len()
-        ));
+        // File lists with paths - critical for fuzzy matching
+        context.push_str("\n=== Repository Files ===\n");
+
+        if !state.staged_files.is_empty() {
+            context.push_str("\nStaged files:\n");
+            for file in state.staged_files.iter().take(50) {
+                context.push_str(&format!("  {}\n", file.path));
+            }
+        }
+
+        if !state.unstaged_files.is_empty() {
+            context.push_str("\nUnstaged files:\n");
+            for file in state.unstaged_files.iter().take(50) {
+                context.push_str(&format!("  {}\n", file.path));
+            }
+        }
+
+        if !state.untracked_files.is_empty() {
+            context.push_str("\nUntracked files:\n");
+            for file in state.untracked_files.iter().take(50) {
+                context.push_str(&format!("  {}\n", file.path));
+            }
+        }
 
         // Recent commits (just count for default)
         context.push_str(&format!("\nRecent commits: {}\n", state.recent_commits.len()));

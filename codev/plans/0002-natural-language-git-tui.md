@@ -416,6 +416,20 @@ pub struct RepoContext {
   - Log warning if truncation occurs
 - Context truncation when over 5000 token cap
 - Query classification heuristics (keywords: "commit", "branch", "diff", "log", "stash")
+- **File Path Context** (critical for fuzzy matching):
+  - Include full file paths in default context for all repository files
+  - List staged, unstaged, and untracked files with complete paths
+  - Limit to 50 files per category to manage token budget
+  - Example format:
+    ```
+    === Repository Files ===
+
+    Untracked files:
+      src/ui/input.rs
+      src/ui/app.rs
+      ...
+    ```
+  - This enables LLM to fuzzy match user queries like "add input.rs" to "src/ui/input.rs"
 
 **Translator** (`src/llm/translator.rs`):
 ```rust
@@ -429,7 +443,7 @@ impl Translator {
 }
 ```
 - Build appropriate context based on query classification
-- Construct prompt for LLM:
+- Construct prompt for LLM with file path matching instructions:
   ```
   You are a git command expert. Translate the user's natural language query into a git command.
 
@@ -438,7 +452,23 @@ impl Translator {
 
   User Query: {query}
 
-  Respond with ONLY the git command, nothing else. The command will be shown to the user for review before execution.
+  CRITICAL INSTRUCTIONS:
+  - Respond with ONLY the git command itself
+  - Do NOT include explanations, reasoning, or commentary
+  - Do NOT use markdown code blocks or backticks
+  - Do NOT use multiple lines
+  - Output format: exactly one line containing just the git command
+
+  FILE PATH MATCHING:
+  - When the user mentions a file name, look at the repository files in the context
+  - Use fuzzy matching to find the correct file path
+  - If user says "add input.rs", look for files ending in "input.rs" like "src/ui/input.rs"
+  - Always use the full path from the repository context
+  - Prioritize exact basename matches over partial matches
+  - Examples:
+    * User: "add input.rs" → git add src/ui/input.rs (if that's the only input.rs)
+    * User: "stage app.rs" → git add src/ui/app.rs (if that's in the file list)
+    * User: "add main" → git add src/main.rs (if that's in the file list)
   ```
 - Parse LLM response to extract git command
 - Validate response format
@@ -1116,6 +1146,9 @@ Not applicable for local CLI application. Errors shown directly to user in TUI.
 | 2025-10-04 | Added raw error toggle UI | Important: spec requires raw error access | Claude |
 | 2025-10-04 | Added token budget enforcement | Important: prevent context overflow | Claude |
 | 2025-10-04 | Added minor issue recommendations | Document optional enhancements | Claude |
+| 2025-10-05 | Added file path context to Phase 3 | Enhancement: enable fuzzy file matching | Claude |
+| 2025-10-05 | Added file path matching to LLM prompt | Enhancement: improve command accuracy | Claude |
+| 2025-10-05 | Added V2 iterative clarification note | Documentation: defer clarification to V2 | Claude |
 
 ## Recommendations for Minor Issues
 
@@ -1199,3 +1232,27 @@ These issues are **not blockers** for v1 but should be considered for future ite
 - Performance optimization can be done iteratively if needed
 - Consider user feedback for v2 feature prioritization
 - Minor issues (#7-12 above) can be addressed during implementation or deferred to v1.1
+
+### V2 Feature: Iterative Clarification Flow
+
+**Scope**: Not included in V1 implementation, documented for future reference
+
+**Purpose**: Allow users to provide additional context when LLM-generated commands fail, enabling conversational refinement
+
+**Key Components** (see spec section "Iterative Clarification Flow (V2)"):
+1. New `AppState::Clarifying` state for entering clarification text
+2. Enhanced `GitCommand` struct to carry error context
+3. New `build_clarification_context()` method in ContextBuilder
+4. UI changes to show 'c' key option after command failures
+5. Clarification input widget (can reuse existing InputWidget with different prompt)
+
+**Implementation Notes**:
+- V1 includes enhanced file path context (full paths in default context)
+- V1 includes file path fuzzy matching instructions in LLM prompt
+- These improvements reduce the need for clarification in many cases
+- V2 will add iterative clarification as a fallback when initial translation fails
+
+**Decision Rationale**:
+- V1 focuses on getting the command right the first time via better context
+- V2 adds conversational refinement for edge cases
+- This phasing allows us to validate the effectiveness of enhanced context before adding clarification complexity

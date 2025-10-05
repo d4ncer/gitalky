@@ -64,6 +64,7 @@ A terminal UI application (gitalky) that:
 - [ ] Configuration file allows setting LLM provider, model, and preferences
 - [ ] All tests pass with >80% coverage
 - [ ] Documentation includes setup guide and example queries
+- [ ] **(V2)** Iterative clarification flow allows users to provide context when commands fail
 
 ## Constraints
 ### Technical Constraints
@@ -181,6 +182,7 @@ A terminal UI application (gitalky) that:
 - [x] **Command sequences**: V1 presents one command at a time for confirmation.
 - [x] **Command chaining**: Simple git command sequences using `&&` are allowed when they represent a single logical operation (e.g., `git add -A && git commit -m "message"`). Complex workflows requiring multiple user confirmations are V2.
 - [x] **LLM Context Strategy**: Detailed escalation rules defined - see "LLM Context Strategy" section below.
+- [x] **Iterative Clarification**: V2 feature - see "Iterative Clarification Flow (V2)" section below.
 
 ### Nice-to-Know (Optimization)
 - [ ] Should the system cache common translations to reduce LLM API calls?
@@ -245,6 +247,161 @@ A terminal UI application (gitalky) that:
 - Compress file lists: "20 untracked files" instead of listing all
 - Truncate large diffs with "... (500 more lines)" indicators
 - Cache repository metadata (branch list, recent commits) for 30 seconds to avoid re-sending
+
+## Iterative Clarification Flow (V2)
+
+**Purpose**: Allow users to provide additional context when LLM-generated commands fail, enabling conversational refinement of git commands.
+
+**Current V1 Flow** (for comparison):
+```
+Input → Translating → Preview → Execute → ShowingOutput → Input
+                              ↓
+                           Cancel → Input
+```
+
+**Enhanced V2 Flow with Clarification**:
+```
+Input → Translating → Preview → Execute → ShowingOutput
+                              ↓                    ↓
+                           Cancel              (if error)
+                              ↓                    ↓
+                            Input ←──────────  [Clarify?]
+                                                   ↓ (press 'c')
+                                              Clarifying
+                                                   ↓
+                                         Translating (with context)
+                                                   ↓
+                                               Preview
+```
+
+**State Machine Changes**:
+1. **New State: `Clarifying`**
+   - Activates when user presses 'c' after a failed command execution
+   - Input widget prompts: "Provide clarification or additional context:"
+   - User can type natural language explanation of what went wrong or what they meant
+   - Pressing Enter sends clarification to LLM with enhanced context
+
+2. **Enhanced Error Context**:
+   - `GitCommand` struct extended to optionally store:
+     - Previous command that failed
+     - Git error message
+     - User's clarification text
+   - Context builder creates enriched prompt for LLM
+
+3. **UI Components**:
+   - **Error Display Widget** (enhanced):
+     - Shows failed command
+     - Shows git error message (translated to plain language)
+     - Shows available actions: `[Any key: dismiss] [c: clarify] [q: quit]`
+   - **Clarification Input Widget**:
+     - Similar to natural language input widget
+     - Different prompt to indicate it's clarification mode
+     - Shows previous command and error above input area for reference
+
+**LLM Context Enhancement for Clarification**:
+
+When user provides clarification, the LLM receives:
+```
+Repository Context:
+<standard repository context>
+
+Previous Attempt:
+User query: "add input.rs"
+Generated command: git add input.rs
+Error: fatal: pathspec 'input.rs' did not match any files
+
+Repository Files:
+<full file list showing available paths>
+
+User Clarification: "I meant the file in src/ui"
+
+Your task: Generate a corrected git command based on:
+1. The original user intent
+2. The error that occurred
+3. The user's clarification
+4. The actual repository file structure
+```
+
+**Example User Flow**:
+
+1. **Initial Query**: User types "add input.rs"
+2. **LLM Response**: `git add input.rs`
+3. **User Confirms**: Presses Enter
+4. **Execution Fails**: Error: `fatal: pathspec 'input.rs' did not match any files`
+5. **Error Display**:
+   ```
+   Command Output
+   ──────────────────────────────────────────────
+   Command: git add input.rs
+   Status: ✗ Failed (exit code: 1)
+
+   Errors:
+   Execution error: Git command failed: Command 'git add input.rs'
+   failed with exit code 128: fatal: pathspec 'input.rs' did not
+   match any files
+
+   [Any key: dismiss] [c: clarify] [q: quit]
+   ```
+6. **User Presses 'c'**: Enters clarification mode
+7. **Clarification Input**:
+   ```
+   Previous Command: git add input.rs
+   Error: pathspec 'input.rs' did not match any files
+   ──────────────────────────────────────────────
+   Clarification: I meant the file in src/ui_
+   ```
+8. **User Presses Enter**: LLM re-translation with full context
+9. **New Command**: `git add src/ui/input.rs`
+10. **Success**: User confirms and executes successfully
+
+**Implementation Components**:
+
+1. **State Machine** (`src/ui/app.rs`):
+   - Add `AppState::Clarifying` variant
+   - Handle 'c' key in `ShowingOutput` state when error occurred
+   - Transition: `ShowingOutput` (error) → `Clarifying` → `Translating` → `Preview`
+
+2. **Context Builder** (`src/llm/context.rs`):
+   - New method: `build_clarification_context(previous_command, error, clarification)`
+   - Combines standard context + error context + user clarification
+   - Special formatting to highlight the clarification request
+
+3. **GitCommand Enhancement** (`src/llm/client.rs`):
+   ```rust
+   pub struct GitCommand {
+       pub command: String,
+       pub explanation: Option<String>,
+       pub context: Option<CommandContext>,  // New field
+   }
+
+   pub struct CommandContext {
+       pub previous_command: Option<String>,
+       pub error_message: Option<String>,
+       pub clarification: Option<String>,
+   }
+   ```
+
+4. **UI Components**:
+   - Modify `OutputDisplay` widget to detect errors and show clarification prompt
+   - Create clarification input mode (can reuse `InputWidget` with different prompt)
+   - Add keyboard handler for 'c' key in error state
+
+**Benefits**:
+- Conversational refinement reduces user frustration
+- LLM learns from its mistakes within a session
+- Users don't need to retype entire queries
+- Natural way to handle ambiguous file paths, branch names, etc.
+
+**Limitations** (V2 scope):
+- Single clarification iteration (no multi-turn conversation)
+- Clarification context not persisted across sessions
+- No learning/improvement of base model (each session starts fresh)
+
+**Future Enhancements** (V3+):
+- Multi-turn clarification conversations
+- Session history for context across multiple commands
+- Learning from user corrections to improve future suggestions
+- Suggested clarification questions from LLM ("Did you mean: src/ui/input.rs?")
 
 ## Performance Requirements
 

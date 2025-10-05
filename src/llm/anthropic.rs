@@ -75,6 +75,17 @@ CRITICAL INSTRUCTIONS:
 - Example good response: git status
 - Example bad response: ```bash\\ngit status\\n```
 
+FILE PATH MATCHING:
+- When the user mentions a file name, look at the repository files in the context
+- Use fuzzy matching to find the correct file path
+- If user says \"add input.rs\", look for files ending in \"input.rs\" like \"src/ui/input.rs\"
+- Always use the full path from the repository context
+- Prioritize exact basename matches over partial matches
+- Examples:
+  * User: \"add input.rs\" → git add src/ui/input.rs (if that's the only input.rs)
+  * User: \"stage app.rs\" → git add src/ui/app.rs (if that's in the file list)
+  * User: \"add main\" → git add src/main.rs (if that's in the file list)
+
 Your response:",
             context, prompt
         );

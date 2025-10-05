@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 /// Represents a git repository and provides access to its state
 #[derive(Debug)]
+#[derive(Clone)]
 pub struct Repository {
     path: PathBuf,
     executor: GitExecutor,

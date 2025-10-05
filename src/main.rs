@@ -8,7 +8,8 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::panic;
 
-fn main() -> io::Result<()> {
+#[tokio::main]
+async fn main() -> io::Result<()> {
     // Validate git version
     match GitVersion::validate() {
         Ok(version) => {
@@ -46,7 +47,7 @@ fn main() -> io::Result<()> {
 
     // Create and run app
     let result = match App::new(repo) {
-        Ok(mut app) => app.run(&mut terminal),
+        Ok(mut app) => app.run(&mut terminal).await,
         Err(e) => {
             // Restore terminal before showing error
             disable_raw_mode()?;

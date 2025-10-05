@@ -13,7 +13,7 @@ pub struct CommandOutput {
 }
 
 /// Executes git commands within a repository
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GitExecutor {
     repo_path: PathBuf,
 }
@@ -43,8 +43,8 @@ impl GitExecutor {
             ));
         }
 
-        // Split command into args
-        let args: Vec<&str> = command.split_whitespace().collect();
+        // Split command into args, respecting quotes
+        let args = self.parse_command(command)?;
         if args.is_empty() {
             return Err(GitError::CommandFailed("Empty command".to_string()));
         }
@@ -57,6 +57,48 @@ impl GitExecutor {
             .map_err(|e| GitError::CommandFailed(format!("Failed to execute git: {}", e)))?;
 
         self.process_output(output, command)
+    }
+
+    /// Parse command string respecting single and double quotes
+    fn parse_command(&self, command: &str) -> Result<Vec<String>> {
+        let mut args = Vec::new();
+        let mut current_arg = String::new();
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+
+        for ch in command.chars() {
+            match ch {
+                '\'' if !in_double_quote => {
+                    in_single_quote = !in_single_quote;
+                }
+                '"' if !in_single_quote => {
+                    in_double_quote = !in_double_quote;
+                }
+                ' ' | '\t' if !in_single_quote && !in_double_quote => {
+                    if !current_arg.is_empty() {
+                        args.push(current_arg.clone());
+                        current_arg.clear();
+                    }
+                }
+                _ => {
+                    current_arg.push(ch);
+                }
+            }
+        }
+
+        // Push final argument if any
+        if !current_arg.is_empty() {
+            args.push(current_arg);
+        }
+
+        // Check for unclosed quotes
+        if in_single_quote || in_double_quote {
+            return Err(GitError::CommandFailed(
+                "Unclosed quote in command".to_string(),
+            ));
+        }
+
+        Ok(args)
     }
 
     /// Process command output into CommandOutput struct
@@ -181,5 +223,84 @@ mod tests {
         let executor = GitExecutor::new(&repo_path);
 
         assert_eq!(executor.repo_path(), repo_path.as_path());
+    }
+
+    #[test]
+    fn test_parse_command_simple() {
+        let (_temp, repo_path) = create_test_repo();
+        let executor = GitExecutor::new(&repo_path);
+
+        let args = executor.parse_command("status --porcelain").unwrap();
+        assert_eq!(args, vec!["status", "--porcelain"]);
+    }
+
+    #[test]
+    fn test_parse_command_single_quotes() {
+        let (_temp, repo_path) = create_test_repo();
+        let executor = GitExecutor::new(&repo_path);
+
+        let args = executor
+            .parse_command("log --pretty=format:'%h %s' --oneline")
+            .unwrap();
+        assert_eq!(args, vec!["log", "--pretty=format:%h %s", "--oneline"]);
+    }
+
+    #[test]
+    fn test_parse_command_double_quotes() {
+        let (_temp, repo_path) = create_test_repo();
+        let executor = GitExecutor::new(&repo_path);
+
+        let args = executor
+            .parse_command(r#"log --pretty=format:"%h %s" --oneline"#)
+            .unwrap();
+        assert_eq!(args, vec!["log", "--pretty=format:%h %s", "--oneline"]);
+    }
+
+    #[test]
+    fn test_parse_command_nested_quotes() {
+        let (_temp, repo_path) = create_test_repo();
+        let executor = GitExecutor::new(&repo_path);
+
+        let args = executor
+            .parse_command(r#"commit -m "It's working""#)
+            .unwrap();
+        assert_eq!(args, vec!["commit", "-m", "It's working"]);
+    }
+
+    #[test]
+    fn test_parse_command_unclosed_single_quote() {
+        let (_temp, repo_path) = create_test_repo();
+        let executor = GitExecutor::new(&repo_path);
+
+        let result = executor.parse_command("log --pretty=format:'%h %s");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_command_unclosed_double_quote() {
+        let (_temp, repo_path) = create_test_repo();
+        let executor = GitExecutor::new(&repo_path);
+
+        let result = executor.parse_command(r#"log --pretty=format:"%h %s"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_command_complex_format() {
+        let (_temp, repo_path) = create_test_repo();
+        let executor = GitExecutor::new(&repo_path);
+
+        let args = executor
+            .parse_command("log --pretty=format:'%C(yellow)%h%Creset %C(blue)%ad%Creset %C(green)%an%Creset %s' --date=short --graph")
+            .unwrap();
+        assert_eq!(
+            args,
+            vec![
+                "log",
+                "--pretty=format:%C(yellow)%h%Creset %C(blue)%ad%Creset %C(green)%an%Creset %s",
+                "--date=short",
+                "--graph"
+            ]
+        );
     }
 }
