@@ -1,4 +1,5 @@
 use crate::error::Result;
+use crate::error_translation::ErrorTranslator;
 use crate::git::{Repository, RepositoryState};
 use crate::llm::{AnthropicClient, ContextBuilder, Translator};
 use crate::security::CommandValidator;
@@ -430,10 +431,18 @@ impl App {
                 let _ = self.refresh_repo_state();
             }
             Err(e) => {
+                // Translate error to user-friendly message
+                let friendly = ErrorTranslator::translate(&e);
+                let error_msg = if let Some(ref suggestion) = friendly.suggestion {
+                    format!("{}\n\n💡 {}", friendly.simple_message, suggestion)
+                } else {
+                    friendly.simple_message.clone()
+                };
+
                 let cmd_output = CommandOutput::new(
                     command.to_string(),
                     String::new(),
-                    format!("Execution error: {}", e),
+                    error_msg,
                     1,
                 );
                 self.output.set_output(cmd_output);
