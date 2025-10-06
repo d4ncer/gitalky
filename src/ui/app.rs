@@ -1,3 +1,4 @@
+use crate::audit::AuditLogger;
 use crate::error::Result;
 use crate::error_translation::ErrorTranslator;
 use crate::git::{Repository, RepositoryState};
@@ -54,6 +55,7 @@ pub struct App {
 
     // Security
     validator: CommandValidator,
+    audit_logger: Option<AuditLogger>,
 
     // State management
     pending_query: Option<String>,
@@ -84,6 +86,9 @@ impl App {
         let mut input = InputWidget::new(input_mode);
         input.set_active(true); // Start with input focused
 
+        // Try to initialize audit logger (non-fatal if it fails)
+        let audit_logger = AuditLogger::new().ok();
+
         Ok(Self {
             repo,
             repo_state,
@@ -95,6 +100,7 @@ impl App {
             output: OutputDisplay::new(),
             translator,
             validator: CommandValidator::new(),
+            audit_logger,
             pending_query: None,
             error_message: None,
             dangerous_op_type: None,
@@ -419,6 +425,11 @@ impl App {
 
         match result {
             Ok(output) => {
+                // Log successful command
+                if let Some(ref logger) = self.audit_logger {
+                    let _ = logger.log_command(command, self.repo.path(), output.exit_code);
+                }
+
                 let cmd_output = CommandOutput::new(
                     command.to_string(),
                     output.stdout,
@@ -431,6 +442,11 @@ impl App {
                 let _ = self.refresh_repo_state();
             }
             Err(e) => {
+                // Log failed command
+                if let Some(ref logger) = self.audit_logger {
+                    let _ = logger.log_command(command, self.repo.path(), 1);
+                }
+
                 // Translate error to user-friendly message
                 let friendly = ErrorTranslator::translate(&e);
                 let error_msg = if let Some(ref suggestion) = friendly.suggestion {
