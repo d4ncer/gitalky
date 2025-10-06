@@ -394,6 +394,11 @@ impl App {
                     self.execute_validated_command(terminal, &command).await?;
                 }
                 Err(e) => {
+                    // Log rejected command
+                    if let Some(ref logger) = self.audit_logger {
+                        let _ = logger.log_command(&command, self.repo.path(), 1);
+                    }
+
                     // Validation failed - show error
                     let cmd_output = CommandOutput::new(
                         command,
