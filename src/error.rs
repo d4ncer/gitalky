@@ -21,6 +21,9 @@ pub enum GitError {
 
     #[error("IO error: {0}")]
     IoError(#[from] io::Error),
+
+    #[error("{0}")]
+    Custom(String),
 }
 
 pub type Result<T> = std::result::Result<T, GitError>;

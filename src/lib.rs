@@ -1,4 +1,5 @@
 pub mod audit;
+pub mod config;
 pub mod error;
 pub mod error_translation;
 pub mod git;

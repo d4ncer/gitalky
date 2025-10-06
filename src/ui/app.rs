@@ -1,10 +1,12 @@
 use crate::audit::AuditLogger;
+use crate::config::Config;
 use crate::error::Result;
 use crate::error_translation::ErrorTranslator;
 use crate::git::{Repository, RepositoryState};
 use crate::llm::{AnthropicClient, ContextBuilder, Translator};
 use crate::security::CommandValidator;
 use crate::ui::command_preview::CommandPreview;
+use crate::ui::help::HelpScreen;
 use crate::ui::input::{InputMode, InputWidget};
 use crate::ui::output::{CommandOutput, OutputDisplay};
 use crate::ui::repo_panel::RepositoryPanel;
@@ -16,7 +18,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame, Terminal,
 };
-use std::env;
 use std::io;
 use std::time::Duration;
 
@@ -44,11 +45,13 @@ pub struct App {
     should_quit: bool,
     mode: AppMode,
     state: AppState,
+    config: Config,
 
     // Widgets
     input: InputWidget,
     preview: Option<CommandPreview>,
     output: OutputDisplay,
+    help: HelpScreen,
 
     // LLM components
     translator: Option<Translator>,
@@ -65,12 +68,12 @@ pub struct App {
 }
 
 impl App {
-    /// Create a new App instance with the given repository
-    pub fn new(repo: Repository) -> Result<Self> {
+    /// Create a new App instance with the given repository and config
+    pub fn new(repo: Repository, config: Config) -> Result<Self> {
         let repo_state = repo.state()?;
 
-        // Try to initialize LLM translator
-        let translator = Self::try_init_translator(&repo);
+        // Try to initialize LLM translator using config
+        let translator = Self::try_init_translator(&repo, &config);
         let mode = if translator.is_some() {
             AppMode::Normal
         } else {
@@ -87,7 +90,11 @@ impl App {
         input.set_active(true); // Start with input focused
 
         // Try to initialize audit logger (non-fatal if it fails)
-        let audit_logger = AuditLogger::new().ok();
+        let audit_logger = if config.behavior.log_commands {
+            AuditLogger::new().ok()
+        } else {
+            None
+        };
 
         Ok(Self {
             repo,
@@ -95,9 +102,11 @@ impl App {
             should_quit: false,
             mode,
             state: AppState::Input,
+            config,
             input,
             preview: None,
             output: OutputDisplay::new(),
+            help: HelpScreen::new(),
             translator,
             validator: CommandValidator::new(),
             audit_logger,
@@ -108,14 +117,36 @@ impl App {
         })
     }
 
-    /// Try to initialize translator with API key
-    fn try_init_translator(repo: &Repository) -> Option<Translator> {
-        if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
+    /// Try to initialize translator with API key from config
+    fn try_init_translator(repo: &Repository, config: &Config) -> Option<Translator> {
+        if let Some(api_key) = config.get_api_key() {
             let client = Box::new(AnthropicClient::new(api_key));
             let context_builder = ContextBuilder::new(repo.clone());
             Some(Translator::new(client, context_builder))
         } else {
             None
+        }
+    }
+
+    /// Try to reconnect to LLM (for 'r' key in offline mode)
+    pub async fn try_reconnect(&mut self) -> Result<()> {
+        // Reload config in case user set API key
+        match Config::load() {
+            Ok(new_config) => {
+                self.config = new_config;
+                let translator = Self::try_init_translator(&self.repo, &self.config);
+                if translator.is_some() {
+                    self.translator = translator;
+                    self.mode = AppMode::Normal;
+                    self.input.set_mode(InputMode::Online);
+                    Ok(())
+                } else {
+                    Err(crate::error::GitError::Custom(
+                        "No API key found in config or environment".to_string()
+                    ))
+                }
+            }
+            Err(e) => Err(crate::error::GitError::Custom(format!("Failed to reload config: {}", e))),
         }
     }
 
@@ -153,6 +184,12 @@ impl App {
         frame.render_widget(ratatui::widgets::Clear, frame.area());
 
         let size = frame.area();
+
+        // If help screen is visible, show it instead of normal UI
+        if self.help.visible {
+            self.help.render(frame, size);
+            return;
+        }
 
         // Create layout: title bar + content + bottom panel + status
         // Adjust constraints based on state to give more room for preview/output
@@ -223,14 +260,25 @@ impl App {
         }
 
         // Status bar
-        let status_text = match self.state {
-            AppState::Input => "Enter: submit | q: quit",
+        let mut status_parts = vec![match self.state {
+            AppState::Input => "Enter: submit",
             AppState::Translating => "Please wait...",
             AppState::Preview => "Enter: execute | E: edit | Esc: cancel",
             AppState::ConfirmDangerous => "Type CONFIRM to execute | Esc: cancel",
             AppState::Executing => "Please wait...",
-            AppState::ShowingOutput => "Any key to continue | q: quit",
-        };
+            AppState::ShowingOutput => "Any key to continue",
+        }];
+
+        // Add global shortcuts to status
+        if self.state == AppState::Input {
+            if self.mode == AppMode::Offline {
+                status_parts.push("R: retry connection");
+            }
+            status_parts.push("?: help");
+            status_parts.push("q: quit");
+        }
+
+        let status_text = status_parts.join(" | ");
 
         let status_style = if let Some(ref error) = self.error_message {
             let error_text = format!("Error: {} | Press any key", error);
@@ -253,6 +301,20 @@ impl App {
             return Ok(());
         }
 
+        // Help screen toggle (global)
+        if matches!(key.code, KeyCode::Char('?')) {
+            self.help.toggle();
+            return Ok(());
+        }
+
+        // If help is visible, any other key hides it
+        if self.help.visible {
+            if matches!(key.code, KeyCode::Esc) {
+                self.help.hide();
+            }
+            return Ok(());
+        }
+
         // Clear error message on any key
         if self.error_message.is_some() {
             self.error_message = None;
@@ -262,6 +324,22 @@ impl App {
         // Global quit
         if matches!(key.code, KeyCode::Char('q') | KeyCode::Char('Q')) && self.state == AppState::Input {
             self.should_quit = true;
+            return Ok(());
+        }
+
+        // Retry connection in offline mode (global 'r' key)
+        if matches!(key.code, KeyCode::Char('r') | KeyCode::Char('R'))
+            && self.mode == AppMode::Offline
+            && self.state == AppState::Input
+        {
+            match self.try_reconnect().await {
+                Ok(()) => {
+                    self.error_message = Some("✓ Connected to LLM!".to_string());
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Connection failed: {}", e));
+                }
+            }
             return Ok(());
         }
 
@@ -624,20 +702,20 @@ mod tests {
     fn test_app_creation() {
         // This test requires a real git repo
         if let Ok(repo) = Repository::discover() {
-            let app = App::new(repo);
+            let config = Config::default_config();
+            let app = App::new(repo, config);
             assert!(app.is_ok());
         }
     }
 
     #[test]
     fn test_offline_mode_without_api_key() {
-        // Ensure API key is not set
-        unsafe {
-            env::remove_var("ANTHROPIC_API_KEY");
-        }
-
         if let Ok(repo) = Repository::discover() {
-            let app = App::new(repo).unwrap();
+            let mut config = Config::default_config();
+            config.llm.api_key_env = "NONEXISTENT_API_KEY".to_string();
+            config.llm.api_key = None;
+
+            let app = App::new(repo, config).unwrap();
             assert_eq!(app.mode, AppMode::Offline);
             assert!(app.translator.is_none());
         }

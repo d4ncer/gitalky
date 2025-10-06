@@ -2,6 +2,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use gitalky::config::{Config, FirstRunWizard};
 use gitalky::{GitVersion, Repository};
 use gitalky::ui::App;
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -20,6 +21,41 @@ async fn main() -> io::Result<()> {
             std::process::exit(1);
         }
     }
+
+    // Load or create configuration
+    let config = match Config::load() {
+        Ok(config) => {
+            eprintln!("Loaded configuration from ~/.config/gitalky/config.toml");
+            config
+        }
+        Err(_) => {
+            // Check if config file exists
+            match Config::config_path() {
+                Ok(path) if path.exists() => {
+                    eprintln!("Error: Config file exists but failed to parse");
+                    eprintln!("Please check ~/.config/gitalky/config.toml for errors");
+                    std::process::exit(1);
+                }
+                _ => {
+                    // No config file - run first-run wizard
+                    eprintln!("No configuration found. Running first-run setup...\n");
+                    match FirstRunWizard::run().await {
+                        Ok(config) => {
+                            // Save the config
+                            if let Err(e) = config.save() {
+                                eprintln!("Warning: Failed to save config: {}", e);
+                            }
+                            config
+                        }
+                        Err(e) => {
+                            eprintln!("Setup failed: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+        }
+    };
 
     // Discover repository
     let repo = match Repository::discover() {
@@ -46,7 +82,7 @@ async fn main() -> io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Create and run app
-    let result = match App::new(repo) {
+    let result = match App::new(repo, config) {
         Ok(mut app) => app.run(&mut terminal).await,
         Err(e) => {
             // Restore terminal before showing error
