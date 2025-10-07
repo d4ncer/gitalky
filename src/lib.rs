@@ -9,7 +9,7 @@ pub mod ui;
 
 // Re-export commonly used types for convenience
 pub use audit::AuditLogger;
-pub use error::{GitError, Result};
+pub use error::{AppError, AppResult, GitError, GitResult};
 pub use error_translation::{ErrorTranslator, UserFriendlyError};
 pub use git::{GitVersion, Repository, RepositoryState};
 pub use security::{CommandValidator, DangerousOp, ValidatedCommand, ValidationError};

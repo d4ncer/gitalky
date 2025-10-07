@@ -1,4 +1,4 @@
-use crate::error::{GitError, Result};
+use crate::error::{GitError, GitResult};
 use std::process::Command;
 
 /// Minimum required git version
@@ -14,7 +14,7 @@ pub struct GitVersion {
 
 impl GitVersion {
     /// Detect the installed git version
-    pub fn detect() -> Result<Self> {
+    pub fn detect() -> GitResult<Self> {
         let output = Command::new("git")
             .arg("--version")
             .output()
@@ -31,7 +31,7 @@ impl GitVersion {
     }
 
     /// Parse git version from string like "git version 2.39.2"
-    pub fn parse(version_str: &str) -> Result<Self> {
+    pub fn parse(version_str: &str) -> GitResult<Self> {
         // Expected format: "git version X.Y.Z" or "git version X.Y.Z.windows.1" etc.
         let parts: Vec<&str> = version_str.split_whitespace().collect();
 
@@ -82,7 +82,7 @@ impl GitVersion {
     }
 
     /// Validate that git version is sufficient
-    pub fn validate() -> Result<Self> {
+    pub fn validate() -> GitResult<Self> {
         let version = Self::detect()?;
 
         if !version.is_supported() {

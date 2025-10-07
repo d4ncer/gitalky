@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::error::GitResult;
 use crate::git::Repository;
 
 /// Types of queries that require different context
@@ -31,7 +31,7 @@ impl ContextBuilder {
     }
 
     /// Build default context (~500 tokens)
-    pub fn build_default_context(&self) -> Result<RepoContext> {
+    pub fn build_default_context(&self) -> GitResult<RepoContext> {
         let state = self.repo.state()?;
         let mut context = String::new();
 
@@ -99,7 +99,7 @@ impl ContextBuilder {
     }
 
     /// Build escalated context based on query type
-    pub fn build_escalated_context(&self, query_type: QueryType) -> Result<RepoContext> {
+    pub fn build_escalated_context(&self, query_type: QueryType) -> GitResult<RepoContext> {
         let mut ctx = self.build_default_context()?;
         let state = self.repo.state()?;
 

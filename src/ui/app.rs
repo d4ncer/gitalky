@@ -1,6 +1,6 @@
 use crate::audit::AuditLogger;
 use crate::config::Config;
-use crate::error::Result;
+use crate::error::AppResult;
 use crate::error_translation::ErrorTranslator;
 use crate::git::{Repository, RepositoryState};
 use crate::llm::{AnthropicClient, ContextBuilder, Translator};
@@ -69,7 +69,7 @@ pub struct App {
 
 impl App {
     /// Create a new App instance with the given repository and config
-    pub fn new(repo: Repository, config: Config) -> Result<Self> {
+    pub fn new(repo: Repository, config: Config) -> AppResult<Self> {
         let repo_state = repo.state()?;
 
         // Try to initialize LLM translator using config
@@ -129,7 +129,7 @@ impl App {
     }
 
     /// Try to reconnect to LLM (for 'r' key in offline mode)
-    pub async fn try_reconnect(&mut self) -> Result<()> {
+    pub async fn try_reconnect(&mut self) -> AppResult<()> {
         // Reload config in case user set API key
         match Config::load() {
             Ok(new_config) => {
@@ -141,12 +141,12 @@ impl App {
                     self.input.set_mode(InputMode::Online);
                     Ok(())
                 } else {
-                    Err(crate::error::GitError::Custom(
+                    Err(crate::config::settings::ConfigError::InvalidValue(
                         "No API key found in config or environment".to_string()
-                    ))
+                    ).into())
                 }
             }
-            Err(e) => Err(crate::error::GitError::Custom(format!("Failed to reload config: {}", e))),
+            Err(e) => Err(e.into()),  // ConfigError automatically converts to AppError
         }
     }
 
@@ -561,7 +561,7 @@ impl App {
     }
 
     /// Refresh repository state
-    pub fn refresh_repo_state(&mut self) -> Result<()> {
+    pub fn refresh_repo_state(&mut self) -> AppResult<()> {
         match self.repo.state() {
             Ok(state) => {
                 self.repo_state = state;
@@ -572,7 +572,7 @@ impl App {
             }
             Err(e) => {
                 self.mode = AppMode::Offline;
-                Err(e)
+                Err(e.into())  // GitError automatically converts to AppError
             }
         }
     }

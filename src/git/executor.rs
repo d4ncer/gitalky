@@ -1,4 +1,4 @@
-use crate::error::{GitError, Result};
+use crate::error::{GitError, GitResult};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::Duration;
@@ -30,12 +30,12 @@ impl GitExecutor {
     ///
     /// The command string should not include "git" prefix
     /// Example: executor.execute("status --porcelain")
-    pub fn execute(&self, command: &str) -> Result<CommandOutput> {
+    pub fn execute(&self, command: &str) -> GitResult<CommandOutput> {
         self.execute_with_timeout(command, Duration::from_secs(30))
     }
 
     /// Execute a git command with a custom timeout
-    pub fn execute_with_timeout(&self, command: &str, _timeout: Duration) -> Result<CommandOutput> {
+    pub fn execute_with_timeout(&self, command: &str, _timeout: Duration) -> GitResult<CommandOutput> {
         // Basic input sanitization - no shell interpolation
         if command.contains('$') || command.contains('`') {
             return Err(GitError::CommandFailed(
@@ -60,7 +60,7 @@ impl GitExecutor {
     }
 
     /// Parse command string respecting single and double quotes
-    fn parse_command(&self, command: &str) -> Result<Vec<String>> {
+    fn parse_command(&self, command: &str) -> GitResult<Vec<String>> {
         let mut args = Vec::new();
         let mut current_arg = String::new();
         let mut in_single_quote = false;
@@ -102,7 +102,7 @@ impl GitExecutor {
     }
 
     /// Process command output into CommandOutput struct
-    fn process_output(&self, output: Output, command: &str) -> Result<CommandOutput> {
+    fn process_output(&self, output: Output, command: &str) -> GitResult<CommandOutput> {
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         let exit_code = output.status.code().unwrap_or(-1);

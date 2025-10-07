@@ -1,4 +1,4 @@
-use crate::error::GitError;
+use crate::error::{AppError, GitError};
 
 #[derive(Debug, Clone)]
 pub struct UserFriendlyError {
@@ -10,6 +10,44 @@ pub struct UserFriendlyError {
 pub struct ErrorTranslator;
 
 impl ErrorTranslator {
+    /// Translate an AppError into a user-friendly error message
+    pub fn translate_app_error(error: &AppError) -> UserFriendlyError {
+        // Match on AppError variants to provide context-specific messages
+        match error {
+            AppError::Git(git_err) => Self::translate(git_err),
+            AppError::Config(config_err) => UserFriendlyError {
+                simple_message: "Configuration error occurred.".to_string(),
+                suggestion: Some("Check your config file at ~/.config/gitalky/config.toml".to_string()),
+                raw_error: config_err.to_string(),
+            },
+            AppError::Llm(llm_err) => UserFriendlyError {
+                simple_message: "Error communicating with LLM.".to_string(),
+                suggestion: Some("Check your API key and network connection".to_string()),
+                raw_error: llm_err.to_string(),
+            },
+            AppError::Translation(trans_err) => UserFriendlyError {
+                simple_message: "Error translating your query.".to_string(),
+                suggestion: Some("Try rephrasing your question or check connection".to_string()),
+                raw_error: trans_err.to_string(),
+            },
+            AppError::Security(sec_err) => UserFriendlyError {
+                simple_message: "Command validation failed for security reasons.".to_string(),
+                suggestion: None,
+                raw_error: sec_err.to_string(),
+            },
+            AppError::Setup(setup_err) => UserFriendlyError {
+                simple_message: "Setup error occurred.".to_string(),
+                suggestion: Some("Try running the first-run wizard again".to_string()),
+                raw_error: setup_err.to_string(),
+            },
+            AppError::Io(io_err) => UserFriendlyError {
+                simple_message: "I/O error occurred.".to_string(),
+                suggestion: Some("Check file permissions and disk space".to_string()),
+                raw_error: io_err.to_string(),
+            },
+        }
+    }
+
     /// Translate a GitError into a user-friendly error message
     pub fn translate(error: &GitError) -> UserFriendlyError {
         let raw_error = error.to_string();

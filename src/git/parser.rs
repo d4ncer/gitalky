@@ -1,7 +1,7 @@
-use crate::error::Result;
+use crate::error::GitResult;
 
 /// Parse git status --porcelain=v2 output
-pub fn parse_status_porcelain_v2(output: &str) -> Result<Vec<StatusEntry>> {
+pub fn parse_status_porcelain_v2(output: &str) -> GitResult<Vec<StatusEntry>> {
     let mut entries = Vec::new();
 
     for line in output.lines() {
@@ -63,7 +63,7 @@ pub fn parse_status_porcelain_v2(output: &str) -> Result<Vec<StatusEntry>> {
 }
 
 /// Parse git log output with format %H%x00%s
-pub fn parse_log(output: &str) -> Result<Vec<CommitEntry>> {
+pub fn parse_log(output: &str) -> GitResult<Vec<CommitEntry>> {
     let mut commits = Vec::new();
 
     for line in output.lines() {
@@ -90,7 +90,7 @@ pub fn parse_log(output: &str) -> Result<Vec<CommitEntry>> {
 }
 
 /// Parse git branch -vv output with format
-pub fn parse_branch_list(output: &str) -> Result<Vec<BranchEntry>> {
+pub fn parse_branch_list(output: &str) -> GitResult<Vec<BranchEntry>> {
     let mut branches = Vec::new();
 
     for line in output.lines() {
@@ -120,7 +120,7 @@ pub fn parse_branch_list(output: &str) -> Result<Vec<BranchEntry>> {
 }
 
 /// Parse git stash list output with format %gd%x00%s
-pub fn parse_stash_list(output: &str) -> Result<Vec<StashEntry>> {
+pub fn parse_stash_list(output: &str) -> GitResult<Vec<StashEntry>> {
     let mut stashes = Vec::new();
 
     for line in output.lines() {

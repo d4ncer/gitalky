@@ -1,4 +1,4 @@
-use crate::error::{GitError, Result};
+use crate::error::{GitError, GitResult};
 use crate::git::executor::GitExecutor;
 use crate::git::parser::{self, CommitEntry, StashEntry, StatusEntry};
 use std::env;
@@ -14,7 +14,7 @@ pub struct Repository {
 
 impl Repository {
     /// Detect git repository from current working directory
-    pub fn discover() -> Result<Self> {
+    pub fn discover() -> GitResult<Self> {
         let current_dir = env::current_dir().map_err(|e| {
             GitError::IoError(e)
         })?;
@@ -23,7 +23,7 @@ impl Repository {
     }
 
     /// Detect git repository starting from a specific directory
-    pub fn discover_from<P: AsRef<Path>>(start_path: P) -> Result<Self> {
+    pub fn discover_from<P: AsRef<Path>>(start_path: P) -> GitResult<Self> {
         let mut current = start_path.as_ref().to_path_buf();
 
         loop {
@@ -53,7 +53,7 @@ impl Repository {
     }
 
     /// Query the current repository state
-    pub fn state(&self) -> Result<RepositoryState> {
+    pub fn state(&self) -> GitResult<RepositoryState> {
         let current_branch = self.current_branch()?;
         let upstream = self.upstream_info(&current_branch)?;
         let status_entries = self.status()?;
@@ -96,7 +96,7 @@ impl Repository {
     }
 
     /// Get the current branch name
-    fn current_branch(&self) -> Result<Option<String>> {
+    fn current_branch(&self) -> GitResult<Option<String>> {
         match self.executor.execute("branch --show-current") {
             Ok(output) => {
                 let branch = output.stdout.trim();
@@ -112,7 +112,7 @@ impl Repository {
     }
 
     /// Get upstream tracking info for the current branch
-    fn upstream_info(&self, branch: &Option<String>) -> Result<Option<UpstreamInfo>> {
+    fn upstream_info(&self, branch: &Option<String>) -> GitResult<Option<UpstreamInfo>> {
         let branch_name = match branch {
             Some(b) => b,
             None => return Ok(None), // No branch (detached HEAD)
@@ -157,13 +157,13 @@ impl Repository {
     }
 
     /// Get status entries
-    fn status(&self) -> Result<Vec<StatusEntry>> {
+    fn status(&self) -> GitResult<Vec<StatusEntry>> {
         let output = self.executor.execute("status --porcelain=v2")?;
         parser::parse_status_porcelain_v2(&output.stdout)
     }
 
     /// Get recent commits
-    fn recent_commits(&self, count: usize) -> Result<Vec<CommitEntry>> {
+    fn recent_commits(&self, count: usize) -> GitResult<Vec<CommitEntry>> {
         let cmd = format!("log -n {} --format=%H%x00%s", count);
         match self.executor.execute(&cmd) {
             Ok(output) => parser::parse_log(&output.stdout),
@@ -172,7 +172,7 @@ impl Repository {
     }
 
     /// Get stash list
-    fn stash_list(&self) -> Result<Vec<StashEntry>> {
+    fn stash_list(&self) -> GitResult<Vec<StashEntry>> {
         match self.executor.execute("stash list --format=%gd%x00%s") {
             Ok(output) => parser::parse_stash_list(&output.stdout),
             Err(_) => Ok(Vec::new()), // No stashes
