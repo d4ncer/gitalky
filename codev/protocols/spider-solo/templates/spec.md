@@ -86,6 +86,127 @@
 - **Resource Usage**: [e.g., <500MB memory]
 - **Availability**: [e.g., 99.9% uptime]
 
+## Async Execution Architecture
+<!-- REQUIRED: Map async/await boundaries to prevent runtime conflicts -->
+
+**Purpose**: Define which functions are async and trace execution context from entry point to leaf functions.
+
+**Execution Context Map**:
+```
+Entry point: main.rs
+├─ [async/sync?] function_name()
+│  ├─ [async/sync?] sub_function()
+│  └─ [async/sync?] another_function()
+└─ [async/sync?] other_path()
+```
+
+**Async Boundaries**:
+- Functions marked `async`: [list all async functions]
+- Runtime initialization: [where tokio/async-std runtime starts]
+- Blocking operations: [any sync operations in async context]
+- **Critical**: Ensure no nested runtime creation (e.g., `block_on` inside async context)
+
+**Design Decisions**:
+- [ ] Why is function X async? [Reason: network I/O, file I/O, etc.]
+- [ ] Why is function Y sync? [Reason: pure computation, no I/O]
+- [ ] How do sync and async code interact? [Via spawn_blocking, etc.]
+
+## Error Handling Architecture
+<!-- REQUIRED: Define error types and conversion paths -->
+
+**Purpose**: Specify error types per module and how they convert for unified handling.
+
+**Module-Level Errors**:
+- `[ModuleName]Error` (src/[module]/error.rs): [description]
+  - Variants: [list key error variants]
+  - Example: `GitError { NotARepository, CommandFailed(String), ... }`
+
+**Top-Level Application Error**:
+- `AppError` (src/error.rs): Unified error type for application
+- Conversions:
+  - `impl From<[Module1]Error> for AppError`
+  - `impl From<[Module2]Error> for AppError`
+  - [List all conversions]
+
+**Error Flow**:
+```
+Low-level module
+  └─> Module-specific error
+      └─> Converted to AppError
+          └─> UI displays user-friendly message
+```
+
+**Error Context**:
+- [ ] What context should errors preserve? [File paths, command details, etc.]
+- [ ] Should errors be logged automatically? [Yes/No and where]
+- [ ] How are errors reported to users? [UI messages, console output, etc.]
+
+## Testing Methodology
+<!-- REQUIRED: Specify testing approach and validation tools -->
+
+**Testing Approach**:
+- [ ] Test-Driven Development (TDD): Write failing test first, then implement
+- [ ] Bottom-Up: Implement components, then add tests
+- [ ] Specify: [Chosen approach and why]
+
+**Test Levels** (in order of execution):
+1. **Unit Tests**: Module-level, >85% coverage
+   - Tool: Built-in Rust test framework
+   - Run: `cargo test --lib`
+   - Coverage: [tool name, e.g., tarpaulin]
+
+2. **Integration Tests**: End-to-end flows
+   - Tool: Built-in Rust test framework
+   - Run: `cargo test --test integration_test`
+   - Scope: [Which workflows to test]
+
+3. **Performance Benchmarks**: Automated regression detection
+   - Tool: [e.g., criterion, divan]
+   - Run: `cargo bench`
+   - Targets: [List specific benchmarks matching performance requirements]
+     - Benchmark 1: [Name] - Target: [value] - Measures: [what]
+     - Benchmark 2: [Name] - Target: [value] - Measures: [what]
+   - CI Failure Threshold: [e.g., >10% regression]
+
+**Performance Validation**:
+- [ ] How to measure: [Specific benchmarking approach]
+- [ ] When to measure: [On every commit, nightly, etc.]
+- [ ] Failure criteria: [What causes CI to fail]
+
+**Test Data**:
+- Fixtures: [Where test data lives]
+- Mocking: [What external dependencies are mocked]
+- Test repositories: [For git operations, etc.]
+
+## Initialization Dependencies
+<!-- REQUIRED: Define startup sequence and dependency order -->
+
+**Purpose**: Specify what initializes when and what depends on what.
+
+**Startup Sequence** (in order):
+1. [First thing to initialize] - Why: [reason]
+2. [Second thing] - Why: [reason]
+3. [Third thing] - Depends on: [#1, #2]
+4. [Main application starts] - Depends on: [list]
+
+**Dependency Graph**:
+```
+Component A (no dependencies)
+├─> Component B (depends on A)
+│   └─> Component D (depends on B)
+└─> Component C (depends on A)
+```
+
+**Critical Decisions**:
+- [ ] What happens if initialization step X fails? [Graceful degradation? Hard fail?]
+- [ ] Can components initialize in parallel? [Yes/No and which ones]
+- [ ] Is there a first-run setup? [Yes/No - describe flow]
+
+**First-Run vs Normal Run**:
+- First-run: [What's different on first launch]
+- Normal run: [Standard startup path]
+- Conditions: [How to detect first-run]
+
 ## Security Considerations
 - [Authentication requirements]
 - [Authorization model]
