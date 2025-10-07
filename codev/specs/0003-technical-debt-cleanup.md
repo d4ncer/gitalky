@@ -18,17 +18,17 @@
 After completing Phase 6 of Gitalky, several architectural issues were identified through comprehensive reviews:
 
 1. **Error Handling Technical Debt**: `GitError::Custom` workaround exists because we lack a unified error strategy
-2. **Missing Performance Validation**: No automated benchmarks despite performance requirements (<100ms refresh, <500ms startup)
+2. **Missing Performance Validation**: No automated benchmarks or performance baselines established
 3. **Integration Test Gaps**: Unit tests exist (117 passing) but no end-to-end integration tests
-4. **Incomplete Features**: Theme support mentioned in config but not implemented in UI
+4. **Low Test Coverage**: Current coverage is 34.87% (528/1514 lines), far below industry standards
 
 These issues represent technical debt that will compound if we add V2 features (clarification flow, caching, multi-step workflows) on top of shaky foundations.
 
 **Pain Points**:
 - Developers confused by multiple error types with unclear conversion paths
-- No CI validation that performance requirements are met
+- No performance baseline or regression detection
 - Integration bugs could slip through unit-test-only coverage
-- Config has unused fields creating user confusion
+- Large portions of codebase untested (especially UI at 2.5% coverage)
 
 ## Current State
 
@@ -52,6 +52,7 @@ pub enum GitError {
 ### Performance Validation
 ```
 ❌ No benchmarks exist
+❌ No performance baselines established
 ❌ No CI performance gates
 ❌ No regression detection
 ✅ Manual testing only
@@ -59,17 +60,14 @@ pub enum GitError {
 
 ### Test Coverage
 ```
-✅ Unit tests: 117 passing (good module coverage)
+✅ Unit tests: 117 passing
+❌ Coverage: 34.87% overall (528/1514 lines)
+   - Worst: UI modules (2.5% - 8/316 in app.rs)
+   - Best: LLM translator (100% - 5/5 lines)
+   - Core modules: 40-60% average
 ❌ Integration tests: 1 failing (stash operations), incomplete coverage
 ❌ End-to-end tests: None
 ❌ Performance benchmarks: None
-```
-
-### UI Features
-```
-✅ Repository panel, input, preview, output, help screens
-⚠️  Theme support: Config field exists but not implemented
-❌ No dark/light theme toggle
 ```
 
 ## Desired State
@@ -95,49 +93,43 @@ impl From<LlmError> for AppError { ... }
 
 ### 2. Performance Validation Infrastructure
 ```
+✅ Performance baselines established (current state documented)
 ✅ Criterion benchmarks for:
-    - UI refresh time (target: <100ms)
-    - Startup time (target: <500ms)
+    - UI refresh time
+    - Startup time
     - Memory usage tracking
-✅ CI integration with regression detection (>10% fail build)
-✅ Baseline measurements documented
+✅ CI integration with regression detection (>10% regression fails build)
+✅ Baseline measurements documented and tracked
 ```
 
 ### 3. Comprehensive Test Suite
 ```
-✅ Unit tests: >85% coverage maintained
-✅ Integration tests: End-to-end user workflows
+✅ Unit tests: Coverage increased from 34.87% to >70% overall
+✅ Core modules: >85% coverage (git, llm, config, security)
+✅ Integration tests: 5 end-to-end user workflows with headless TUI testing
 ✅ Performance benchmarks: Automated regression detection
 ✅ Test organization: Clear separation of concerns
-```
-
-### 4. Complete Config Features
-```
-✅ Theme support fully implemented
-✅ Dark/light theme toggle working
-✅ All config fields have corresponding functionality
-✅ No confusing unused config options
 ```
 
 ## Stakeholders
 - **Primary**: Gitalky developers (maintainability)
 - **Secondary**: Future contributors (clarity of architecture)
-- **Tertiary**: End users (performance validation, theme support)
+- **Tertiary**: End users (indirect benefit from improved code quality and performance validation)
 - **Technical Team**: Rust developers familiar with async patterns
 - **Business Owners**: Project maintainers prioritizing code quality
 
 ## Success Criteria
 - [ ] Unified `AppError` type replaces all top-level error handling
-- [ ] All module errors convert cleanly to `AppError`
+- [ ] All module errors (including `TranslationError`) convert cleanly to `AppError`
 - [ ] `GitError::Custom` variant removed
-- [ ] Criterion benchmarks for UI refresh (<100ms), startup (<500ms), memory (<100MB)
-- [ ] CI runs benchmarks and fails on >10% regression
-- [ ] End-to-end integration test suite with >5 critical path tests
-- [ ] Test coverage increases to >90% for core modules
-- [ ] Theme support fully implemented (dark/light toggle)
-- [ ] All config fields have corresponding functionality
+- [ ] Performance baselines established and documented
+- [ ] Criterion benchmarks implemented for UI refresh, startup, memory
+- [ ] CI runs benchmarks and fails on >10% regression from baseline
+- [ ] End-to-end integration test suite with 5 critical path tests
+- [ ] Test coverage increases from 34.87% to >70% overall
+- [ ] Core modules (git, llm, config, security) achieve >85% coverage
 - [ ] Documentation updated with new error handling patterns
-- [ ] All existing tests still pass
+- [ ] All existing 117 unit tests still pass
 - [ ] No breaking changes to public API
 
 ## Constraints
@@ -169,9 +161,8 @@ impl From<LlmError> for AppError { ... }
 
 **Phases**:
 1. **Error Architecture Refactoring** - Unified AppError, remove Custom variant
-2. **Performance Benchmarking** - Add criterion benchmarks and CI integration
-3. **Integration Test Suite** - End-to-end user workflow tests
-4. **Theme Implementation** - Complete config feature with dark/light themes
+2. **Performance Benchmarking** - Establish baselines, add criterion benchmarks and CI integration
+3. **Integration Test Suite** - End-to-end user workflow tests with increased coverage
 
 **Pros**:
 - Each phase independently valuable
@@ -185,7 +176,7 @@ impl From<LlmError> for AppError { ... }
 - More commits/overhead
 - Requires discipline to complete all phases
 
-**Estimated Complexity**: Medium (4 phases, ~2-3 days each)
+**Estimated Complexity**: Medium (3 phases, ~2-4 days each)
 **Risk Level**: Low
 
 ---
@@ -215,7 +206,7 @@ impl From<LlmError> for AppError { ... }
 
 **Description**: Only address blocking technical debt, defer nice-to-haves.
 
-**Scope**: Error architecture only, skip benchmarks/themes/integration tests
+**Scope**: Error architecture only, skip benchmarks/integration tests
 
 **Pros**:
 - Fastest to complete
@@ -224,7 +215,6 @@ impl From<LlmError> for AppError { ... }
 **Cons**:
 - Leaves performance unvalidated
 - Misses opportunity to improve test coverage
-- Theme support still incomplete
 - Debt will continue to grow
 
 **Estimated Complexity**: Low
@@ -244,22 +234,30 @@ impl From<LlmError> for AppError { ... }
 ### Important (Affects Design)
 - [ ] Should `AppError` be in src/error.rs or src/app_error.rs? → Decision: Keep in src/error.rs
 - [ ] How should error context be preserved? → Include source error in AppError variants
-- [ ] What theme colors to use for dark/light modes? → Use standard ratatui color schemes
 - [ ] Should benchmarks run on every CI run or nightly? → Every PR for fast feedback
+- [ ] How to handle Result<T> type alias conflicts? → Use GitResult<T> for git module, AppResult<T> at app level
 
 ### Nice-to-Know (Optimization)
 - [ ] Should we add error codes for programmatic error handling? → V2 feature
 - [ ] Can memory benchmarks be automated? → Use system_profiler/memory_profiler
-- [ ] Should themes be customizable beyond dark/light? → V2 feature
 
 ## Performance Requirements
 
-**Existing Requirements** (must maintain):
-- **UI Refresh**: <100ms for 1000-file repositories
-- **Startup Time**: <500ms (warm start with config cached)
-- **Memory Usage**: <100MB during typical operation
+**Baseline Establishment** (Phase 2, Step 1):
+- Measure current UI refresh time for 100, 1K, 10K file repos
+- Measure current startup time (warm and cold start)
+- Measure current memory usage during typical operation
+- Document baseline values as reference point
+- All benchmarks run 10 times, median value used
 
-**New Requirements** (validation):
+**Target Requirements** (from Spec 0002, to be validated):
+- **UI Refresh**: <100ms for 1000-file repositories (aspirational)
+- **Startup Time**: <500ms (warm start with config cached) (aspirational)
+- **Memory Usage**: <100MB during typical operation (aspirational)
+
+**Regression Detection**:
+- **CI Failure Threshold**: >10% slower than baseline fails build
+- **CI Warning Threshold**: >5% slower than baseline triggers warning
 - **Benchmark Runtime**: <30 seconds total for all benchmarks
 - **CI Overhead**: <2 minutes for benchmark execution
 - **Baseline Stability**: <5% variance between runs
@@ -307,7 +305,10 @@ main.rs: #[tokio::main] async fn main()
 - `ConfigError` (src/config/settings.rs): Configuration
   - Variants: ReadError, ParseError, SerializeError, DirectoryNotFound, InvalidValue
 - `LLMError` (src/llm/client.rs): LLM operations
-  - Variants: ApiError, NetworkError, TimeoutError, InvalidResponse
+  - Variants: ApiError, RateLimitExceeded, Timeout, InvalidResponse, NetworkError, JsonError
+- `TranslationError` (src/llm/translator.rs): Translation operations
+  - Variants: LLMError (from LLMError), ContextError (from GitError)
+  - **Note**: Creates circular dependency (TranslationError → GitError, will be resolved via AppError)
 - `ValidationError` (src/security/validator.rs): Command validation
   - Variants: InvalidCommand, DangerousOperation, InjectionAttempt
 - `SetupError` (src/config/first_run.rs): First-run wizard
@@ -326,6 +327,9 @@ pub enum AppError {
 
     #[error("LLM error: {0}")]
     Llm(#[from] LlmError),
+
+    #[error("Translation error: {0}")]
+    Translation(#[from] TranslationError),
 
     #[error("Security validation error: {0}")]
     Security(#[from] ValidationError),
@@ -348,8 +352,12 @@ pub enum GitError {
     // Custom removed ✅
 }
 
-// Update Result type to use AppError at app level
-pub type Result<T> = std::result::Result<T, AppError>;
+// Result type aliases to avoid conflicts
+pub type GitResult<T> = std::result::Result<T, GitError>;
+pub type AppResult<T> = std::result::Result<T, AppError>;
+
+// Note: Existing code using `Result<T>` in git module will use GitResult<T>
+// App-level code (main.rs, app.rs) will use AppResult<T>
 ```
 
 **Error Flow**:
@@ -370,12 +378,15 @@ Module operation fails
 - [x] UI extracts user-friendly message from AppError
 
 **Migration Strategy**:
-1. Add AppError to src/error.rs
-2. Add From implementations for all module errors
-3. Update App methods to return Result<T, AppError> instead of Result<T>
-4. Remove GitError::Custom usages (replace with specific errors or AppError)
-5. Update error_translation to work with AppError
-6. Update tests to expect AppError where appropriate
+1. Add AppError and AppResult<T> to src/error.rs
+2. Add From implementations for all module errors (including TranslationError)
+3. Rename existing `pub type Result<T>` to `GitResult<T>` in src/error.rs
+4. Update git module to use GitResult<T>
+5. Update App methods to return AppResult<T>
+6. Remove GitError::Custom usages (replace with specific errors or AppError)
+7. Update error_translation to work with AppError
+8. Update tests to expect AppError where appropriate
+9. Move TranslationError to src/llm/translator.rs if not already there
 
 ## Testing Methodology
 
@@ -393,30 +404,69 @@ Module operation fails
    - **Target**: Maintain existing 117 tests, add ~20 for error conversion paths
 
 2. **Integration Tests**: End-to-end flows
-   - Tool: Built-in Rust test framework
-   - Run: `cargo test --test integration_test`
+   - Tool: Built-in Rust test framework with headless TUI testing
+   - Run: `cargo test --test end_to_end_test`
+   - Test Harness: **Headless TUI approach**
+     - Use ratatui TestBackend for rendering without terminal
+     - Inject crossterm events programmatically
+     - Capture render output for assertions
+     - Mock LLM client (MockLlmClient) with predefined responses
    - Scope: Critical user workflows
      - Test 1: Complete workflow from startup → query → execution → output
-     - Test 2: First-run wizard → config creation → TUI launch
+     - Test 2: First-run wizard → config creation → app initialization
      - Test 3: Offline mode detection and reconnection
      - Test 4: Dangerous operation confirmation flow
      - Test 5: Error handling and recovery paths
    - **Target**: 5 comprehensive end-to-end tests
+   - **MockLlmClient Interface**:
+     ```rust
+     pub struct MockLlmClient {
+         responses: Vec<GitCommand>,  // Predefined responses to return
+         call_count: usize,
+     }
+     impl LLMClient for MockLlmClient {
+         async fn call_api(&mut self, ...) -> Result<GitCommand, LLMError> {
+             // Return next predefined response
+         }
+     }
+     ```
 
 3. **Performance Benchmarks**: Automated regression detection
    - Tool: criterion (`criterion = "0.5"`)
    - Run: `cargo bench`
-   - Targets:
-     - Benchmark 1: `repo_state_refresh` - Target: <100ms - Measures: Time to query and parse git status in 1000-file repo
-     - Benchmark 2: `app_startup` - Target: <500ms - Measures: Time from main() to TUI ready (warm start)
-     - Benchmark 3: `memory_usage` - Target: <100MB - Measures: Heap allocation during typical operation
-   - CI Failure Threshold: >10% regression on any benchmark
-   - Baseline: Run benchmarks 10 times, take median as baseline
+   - Targets (baseline-relative, not absolute):
+     - Benchmark 1: `repo_state_refresh` - Measures: Time to query and parse git status in 100/1K/10K file repos
+     - Benchmark 2: `app_startup_warm` - Measures: Time from Config::load() to App::new() (warm start)
+     - Benchmark 3: `app_startup_cold` - Measures: Time from first-run wizard to App::new() (cold start)
+     - Benchmark 4: `memory_baseline` - Measures: Heap allocation during 10-operation workflow
+   - CI Failure Threshold: >10% regression from baseline on any benchmark
+   - CI Warning Threshold: >5% regression from baseline
+   - Baseline: Run benchmarks 10 times on main branch, take median as baseline
+   - Baseline Storage: Store in `benches/baselines.json` committed to repo
 
 **Performance Validation**:
 - [x] How to measure: Criterion benchmarks with statistical analysis
 - [x] When to measure: On every PR (CI) and nightly for trending
 - [x] Failure criteria: >10% regression fails CI, >5% triggers warning
+
+**CI Integration Details**:
+- **Platform**: GitHub Actions (assumed based on common Rust projects)
+- **Workflow File**: `.github/workflows/ci.yml`
+- **Jobs**:
+  1. `test`: Run `cargo test --all-targets` (unit + integration tests)
+  2. `coverage`: Run `cargo tarpaulin` and upload to Codecov/Coveralls
+  3. `bench`: Run `cargo bench`, compare to `benches/baselines.json`
+     - If >10% regression: Fail build
+     - If >5% regression: Post comment on PR with warning
+     - If improvement: Post comment celebrating improvement
+- **Baseline Management**:
+  - Baselines stored in repo at `benches/baselines.json`
+  - Updated when merging to main branch
+  - Manual override: `cargo bench --save-baseline` updates baseline file
+- **Environment Considerations**:
+  - CI runners may be slower/faster than dev machines
+  - Regression % measured relative to CI's own baseline, not dev baseline
+  - Separate baselines for different runner types (macos, linux, etc.)
 
 **Test Data**:
 - Fixtures: `tests/fixtures/` - Sample git repositories for testing
@@ -555,17 +605,6 @@ Git Version Check (no dependencies)
     - Variance <5% between runs
     - CI can reliably detect regressions
 
-### Non-Functional Tests (Theme)
-
-13. **Theme Toggle**
-    - User presses 'T' (or configured key) → Theme switches dark ↔ light
-    - Colors update correctly for all UI elements
-    - Theme preference saved to config
-
-14. **Theme Persistence**
-    - User sets theme → Restarts app → Theme preference restored
-    - Config file reflects theme choice
-
 ## Dependencies
 
 **Existing Dependencies** (no changes):
@@ -582,9 +621,8 @@ Git Version Check (no dependencies)
 
 **Internal Dependencies**:
 - Error refactoring affects: git, config, llm, security, ui modules
-- Benchmarks depend on: git, ui modules
+- Benchmarks depend on: git, ui, config modules
 - Integration tests depend on: all modules
-- Theme support depends on: ui, config modules
 
 ## References
 
@@ -602,66 +640,67 @@ Git Version Check (no dependencies)
 | Error refactoring breaks existing functionality | Medium | High | TDD approach - write tests first, run full test suite after each change |
 | Performance benchmarks too slow for CI | Low | Medium | Set timeout limits, run subset in CI, full suite nightly |
 | Integration tests flaky | Medium | Medium | Use deterministic test repos, avoid timing dependencies, retry logic |
-| Theme colors not accessible | Low | Medium | Use standard ratatui colors, test with color-blind simulation |
 | AppError conversion loses context | Low | High | Preserve source error, include context in messages, thorough testing |
 | Refactoring takes longer than estimated | Medium | Low | Incremental approach allows stopping at any phase |
+| CI environment variance affects benchmarks | Medium | Medium | Use relative baselines per environment, separate baselines for different runners |
+| Test coverage improvements require extensive mocking | Medium | Medium | Focus on core modules first, use TestBackend for UI testing |
 
 ## Implementation Phases (Preview)
 
 1. **Phase 1: Error Architecture Refactoring** (~2-3 days)
-   - Add AppError to src/error.rs
-   - Implement From conversions for all module errors
-   - Remove GitError::Custom
-   - Update App and main to use AppError
+   - Add AppError and AppResult<T> to src/error.rs
+   - Rename Result<T> to GitResult<T>
+   - Implement From conversions for all module errors (including TranslationError)
+   - Remove GitError::Custom usages
+   - Update App and main to use AppResult<T>
    - Update error_translation for AppError
-   - Comprehensive error tests
+   - Add ~20 unit tests for error conversion paths
+   - Increase coverage of error handling code
 
-2. **Phase 2: Performance Benchmarking Infrastructure** (~2-3 days)
+2. **Phase 2: Performance Benchmarking Infrastructure** (~3-4 days)
+   - Establish current performance baselines (Step 1)
    - Add criterion dependency
-   - Implement repo_state_refresh benchmark
-   - Implement app_startup benchmark
-   - Implement memory_usage tracking
-   - CI integration with regression detection
-   - Baseline documentation
+   - Implement 4 benchmarks (repo_state_refresh, app_startup_warm/cold, memory_baseline)
+   - Create benches/baselines.json
+   - CI integration with GitHub Actions
+   - Configure regression detection (>10% fail, >5% warn)
+   - Document baseline management
 
-3. **Phase 3: Integration Test Suite** (~2-3 days)
-   - Create tests/end_to_end_test.rs
-   - Implement 5 critical path tests
+3. **Phase 3: Integration Test Suite & Coverage Improvements** (~3-4 days)
+   - Create tests/end_to_end_test.rs with headless TUI testing
+   - Implement MockLlmClient
+   - Implement 5 critical path integration tests
    - Add test fixtures and helpers
-   - Mock LLM client for offline testing
-   - Document test maintenance
+   - Increase coverage from 34.87% to >70% overall
+   - Focus on core modules: git, llm, config, security (target >85%)
+   - Document test maintenance and best practices
 
-4. **Phase 4: Theme Support Implementation** (~2-3 days)
-   - Define dark/light color schemes
-   - Add theme toggle key binding
-   - Update all UI widgets for theme support
-   - Persist theme preference to config
-   - Test theme switching
-
-**Total Estimated Timeline**: 8-12 days
+**Total Estimated Timeline**: 8-11 days (3 phases)
 
 ## Success Metrics
 
 **Quantitative**:
-- Error refactoring: 0 uses of GitError::Custom, all modules use AppError
-- Test coverage: Increase from current to >90% for core modules
-- Performance: All benchmarks pass (<100ms, <500ms, <100MB)
+- Error refactoring: 0 uses of GitError::Custom, all modules use AppError/AppResult
+- Test coverage: Increase from 34.87% to >70% overall, >85% for core modules
+- Performance: Baselines established and documented
+- Regression detection: CI fails on >10% performance regression
 - Integration tests: 5 end-to-end tests passing
 - Build time: CI overhead <5 minutes for tests + benchmarks
 
 **Qualitative**:
-- Code reviewers find error handling clearer
-- Performance regressions caught automatically
+- Code reviewers find error handling clearer and more consistent
+- Performance regressions caught automatically before merge
 - Integration bugs caught before deployment
-- Users appreciate theme support
+- Developers confident in test coverage
 
 ## Notes
 
 - This spec addresses technical debt before adding V2 features (clarification, caching, multi-step)
 - Incremental approach allows stopping after any phase if priorities change
-- Focus is on code quality and maintainability, not new user features (except themes)
+- Focus is purely on code quality and maintainability, not user-facing features
 - Each phase is independently valuable and testable
 - No breaking changes to user-facing functionality
+- Theme support deferred to separate UI polish spec (not technical debt)
 
 ## Approval
 - [ ] Technical Lead Review
