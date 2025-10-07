@@ -27,3 +27,16 @@ toml = "0.8"
 
 [dev-dependencies]
 tempfile = "3.0"  # For test git repositories
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "git_operations"
+harness = false
+
+[[bench]]
+name = "llm_translation"
+harness = false
+
+[[bench]]
+name = "error_translation"
+harness = false
