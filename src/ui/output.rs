@@ -30,6 +30,7 @@ impl CommandOutput {
     }
 }
 
+/// Some comment
 /// Output display widget for showing command execution results
 pub struct OutputDisplay {
     output: Option<CommandOutput>,
@@ -82,7 +83,9 @@ impl Widget for &OutputDisplay {
 
             // Header with status
             let status_style = if output.is_success() {
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
             };
@@ -107,14 +110,18 @@ impl Widget for &OutputDisplay {
 
             // Stdout
             if !output.stdout.is_empty() {
-                lines.push(Line::from(vec![
-                    Span::styled("Output:", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    "Output:",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                )]));
 
                 for line in output.stdout.lines() {
-                    lines.push(Line::from(vec![
-                        Span::styled(line, Style::default().fg(Color::White)),
-                    ]));
+                    lines.push(Line::from(vec![Span::styled(
+                        line,
+                        Style::default().fg(Color::White),
+                    )]));
                 }
 
                 lines.push(Line::from(""));
@@ -122,14 +129,16 @@ impl Widget for &OutputDisplay {
 
             // Stderr
             if !output.stderr.is_empty() {
-                lines.push(Line::from(vec![
-                    Span::styled("Errors:", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    "Errors:",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                )]));
 
                 for line in output.stderr.lines() {
-                    lines.push(Line::from(vec![
-                        Span::styled(line, Style::default().fg(Color::Red)),
-                    ]));
+                    lines.push(Line::from(vec![Span::styled(
+                        line,
+                        Style::default().fg(Color::Red),
+                    )]));
                 }
             }
 
