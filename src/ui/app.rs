@@ -65,6 +65,10 @@ pub struct App {
     error_message: Option<String>,
     dangerous_op_type: Option<crate::security::DangerousOp>,
     confirmation_input: String,
+
+    // State refresh optimization
+    idle_cycles: u32,
+    needs_refresh: bool,
 }
 
 impl App {
@@ -114,6 +118,8 @@ impl App {
             error_message: None,
             dangerous_op_type: None,
             confirmation_input: String::new(),
+            idle_cycles: 0,
+            needs_refresh: false,
         })
     }
 
@@ -160,13 +166,25 @@ impl App {
                 if let Event::Key(key) = event::read()? {
                     self.handle_key_event(key, terminal).await?;
                 }
+                // Reset idle cycles on user input
+                self.idle_cycles = 0;
             } else {
-                // Refresh repository state on timeout (only when not busy)
-                if (self.state == AppState::Input || self.state == AppState::ShowingOutput)
-                    && let Err(e) = self.refresh_repo_state()
-                {
-                    self.mode = AppMode::Offline;
-                    eprintln!("Failed to refresh repo state: {}", e);
+                // Increment idle cycles on timeout
+                self.idle_cycles += 1;
+
+                // Only refresh if:
+                // 1. We're in an idle state (Input or ShowingOutput)
+                // 2. Either needs_refresh flag is set OR enough idle time has passed (1 second = 10 cycles)
+                let should_refresh = (self.state == AppState::Input || self.state == AppState::ShowingOutput)
+                    && (self.needs_refresh || self.idle_cycles >= 10);
+
+                if should_refresh {
+                    if let Err(e) = self.refresh_repo_state() {
+                        self.mode = AppMode::Offline;
+                        eprintln!("Failed to refresh repo state: {}", e);
+                    }
+                    self.needs_refresh = false;
+                    self.idle_cycles = 0; // Reset after refresh
                 }
             }
 
@@ -521,8 +539,8 @@ impl App {
                 );
                 self.output.set_output(cmd_output);
 
-                // Refresh repo state after command
-                let _ = self.refresh_repo_state();
+                // Mark that state needs refresh (will happen in event loop)
+                self.needs_refresh = true;
             }
             Err(e) => {
                 // Log failed command
@@ -638,6 +656,15 @@ impl App {
             }
             Some(crate::security::DangerousOp::FilterBranch) => {
                 "⚠️  FILTER-BRANCH - This will rewrite git history!"
+            }
+            Some(crate::security::DangerousOp::ForceCheckout) => {
+                "⚠️  FORCE CHECKOUT - This will discard local changes!"
+            }
+            Some(crate::security::DangerousOp::DeleteBranch) => {
+                "⚠️  DELETE BRANCH - This will permanently delete the branch!"
+            }
+            Some(crate::security::DangerousOp::Rebase) => {
+                "⚠️  REBASE - This will rewrite commit history!"
             }
             None => "⚠️  DANGEROUS OPERATION",
         };

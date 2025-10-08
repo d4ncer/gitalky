@@ -194,29 +194,42 @@ enum AppMode {
 **Decision**: Multi-layer validation before executing any git command.
 
 **Validation Layers**:
-1. **Sanitization**: Remove shell metacharacters (`;`, `|`, `$()`, `` ` ``)
-2. **Validation**: Check against allowlist of git subcommands
-3. **Dangerous Operation Detection**: Identify destructive commands
-4. **User Confirmation**: Require explicit confirmation for dangerous ops
-5. **Audit Logging**: Log all executed commands (if enabled)
+1. **Sanitization** (Executor): Remove shell metacharacters (`;`, `|`, `&`, `$()`, `` ` ``)
+2. **Environment Sanitization** (Executor): Remove dangerous git env vars (e.g., `GIT_SSH_COMMAND`)
+3. **Validation** (Validator): Check against allowlist of git subcommands
+4. **Dangerous Operation Detection** (Validator): Identify destructive commands
+5. **User Confirmation**: Require explicit confirmation for dangerous ops
+6. **Audit Logging**: Log all executed commands (if enabled)
 
 ```rust
 // Validation flow
-user_input
+user_input (or LLM output)
   → CommandValidator::validate(command)
   → ValidatedCommand { command, is_dangerous, danger_type }
   → if dangerous: require_confirmation()
   → GitExecutor::execute(validated_command)
+      ↳ Defense-in-depth: sanitize input, clean env vars, parse to Vec<String>
   → AuditLogger::log(command, result)
 ```
 
 **Dangerous Operations** (require confirmation):
-- `push --force`, `push -f`
-- `reset --hard`
-- `clean -fd`, `clean -fdx`
-- `rebase` (interactive or not)
-- `branch -D`
-- `checkout --force`
+- `push --force`, `push -f` ✅
+- `reset --hard` ✅
+- `clean -fd`, `clean -fdx` ✅
+- `rebase` (interactive or not) ✅
+- `branch -D`, `branch -d` ✅
+- `checkout --force`, `checkout -f` ✅
+- `filter-branch` ✅
+
+**Security Strengths**:
+- ✅ **Defense-in-Depth**: Both Validator and Executor sanitize inputs
+- ✅ **Allowlist Approach**: Only permitted git subcommands allowed
+- ✅ **Environment Hardening**: Dangerous env vars stripped before execution
+- ✅ **Comprehensive Dangerous Op Detection**: All major destructive operations covered
+
+**Security Gaps**:
+- ⚠️ **No LLM Output Validation**: Assumes LLM returns sensible commands (could be gibberish)
+- ⚠️ **Command Injection via Flags**: Doesn't validate all flag combinations (e.g., `--upload-pack`)
 
 **Rationale**:
 - **Safety**: Prevents accidental data loss
@@ -224,7 +237,7 @@ user_input
 - **Education**: Warnings teach about destructive operations
 - **Compliance**: Audit log for enterprise use cases
 
-### 7. **Context-Aware LLM Integration** ✅
+### 7. **Context-Aware LLM Integration** ⚠️
 
 **Decision**: Build rich repository context before LLM calls, with token budget enforcement.
 
@@ -244,15 +257,20 @@ pub enum QueryType {
 1. Classify user query → QueryType
 2. Build default context (~500 tokens): branch, files, commits count
 3. Build escalated context for QueryType (~2000 tokens): detailed info
-4. Enforce 5000 token budget (truncate if needed)
+4. ~~Enforce 5000 token budget (truncate if needed)~~ **⚠️ NOT IMPLEMENTED**
 5. Send context + query to LLM
-6. Receive git command
+6. Receive git command **⚠️ WITHOUT VALIDATION**
 
 **Rationale**:
 - **Accuracy**: LLM has repo state, makes better suggestions
 - **Token Efficiency**: Only send relevant context (escalation)
-- **Cost Control**: Hard limit on token usage
+- **Cost Control**: ~~Hard limit on token usage~~ **⚠️ NO ACTUAL BUDGET ENFORCEMENT**
 - **Performance**: Minimal context = faster responses
+
+**Known Limitations**:
+- ⚠️ **No token budget enforcement**: Code estimates tokens but doesn't enforce limits
+- ⚠️ **No LLM output validation**: Assumes LLM always returns valid git commands
+- ⚠️ **No hallucination detection**: Could accept invalid commands from LLM
 
 **Example Escalation**:
 - Query: "commit my changes" → QueryType::Commit
@@ -260,7 +278,7 @@ pub enum QueryType {
 - LLM sees: "staged: src/main.rs (Modified), unstaged: README.md (Modified)"
 - Result: More accurate commit command
 
-### 8. **Async Architecture** ✅
+### 8. **Async Architecture** ⚠️
 
 **Decision**: Use Tokio async runtime for LLM calls, keep UI responsive.
 
@@ -275,7 +293,7 @@ async fn main() -> io::Result<()> {
 
 **Rationale**:
 - **Responsiveness**: UI doesn't block during LLM API calls (can take 1-3 seconds)
-- **Concurrency**: Could add features like background state refresh
+- ~~**Concurrency**: Could add features like background state refresh~~ **⚠️ NOT UTILIZED**
 - **Network I/O**: HTTP requests are naturally async
 - **Future-Proof**: Easy to add more async operations
 
@@ -284,9 +302,15 @@ async fn main() -> io::Result<()> {
 - First-run wizard (async for consistency)
 
 **Synchronous Operations**:
-- Git command execution (via `std::process::Command`)
+- Git command execution (via `std::process::Command`) **⚠️ BLOCKS UI THREAD**
 - UI rendering (immediate)
 - File I/O (config, audit logs)
+- Repository state refresh (via `git status`) **⚠️ CAN TAKE 100ms-1s ON LARGE REPOS**
+
+**Known Limitations**:
+- ⚠️ **Async theater**: Most operations are synchronous; Tokio is only used for HTTP
+- ⚠️ **Git blocks UI**: Long-running git commands freeze the UI
+- ✅ **State refresh debounced**: Now uses 1-second debouncing + dirty detection (fixed)
 
 ### 9. **Widget Composition Pattern** ✅
 
@@ -359,11 +383,25 @@ show_raw_errors = false
 
 ### ⚠️ Known Limitations
 
+#### Design & Testing
 1. **TUI Testing**: UI code is hard to unit test (requires terminal), covered by manual QA
 2. **Git Output Parsing**: Relies on git porcelain format stability
-3. **LLM Latency**: 1-3 second delay for translation (shows "Translating..." state)
-4. **Token Costs**: LLM usage incurs API costs (mitigated by context budgets)
-5. **Platform Support**: Unix-like systems initially (Windows support future work)
+3. **Platform Support**: Unix-like systems initially (Windows support future work)
+
+#### Performance
+4. **Git Blocks UI Thread**: Long-running git commands (e.g., `git log` on large repos) freeze UI
+5. ✅ **State Refresh Optimized**: Now uses 1-second debouncing + dirty detection (previously refreshed every 100ms)
+
+#### LLM Integration
+6. **No Token Budget Enforcement**: Code estimates tokens but doesn't actually enforce limits
+7. **No LLM Output Validation**: Assumes LLM always returns valid git commands (no sanity checking)
+8. **LLM Latency**: 1-3 second delay for translation (shows "Translating..." state)
+9. **Token Costs**: LLM usage incurs API costs
+
+#### Security
+10. ✅ **Command Validation**: Multi-layer validation with allowlist + dangerous operation detection
+11. ✅ **Environment Sanitization**: Removes dangerous git environment variables
+12. ⚠️ **No LLM Hallucination Detection**: Could accept nonsensical commands from LLM if they pass syntax validation
 
 ## Design Patterns Used
 
@@ -385,7 +423,31 @@ show_raw_errors = false
 - **Result/Option Chaining**: Extensive use of `?` operator
 - **Trait Objects**: `Box<dyn LLMClient>` for polymorphism
 
+## Recent Improvements (Post-Spec 0003)
+
+Following critical review of the architecture, several security and performance issues were addressed:
+
+### Security Hardening (2025-10-09)
+- ✅ **Environment Variable Sanitization**: Executor now uses `env_clear()` and only re-adds safe vars
+- ✅ **Command Parsing Security**: Uses `Vec<String>` args instead of shell execution
+- ✅ **Extended Dangerous Op Detection**: Added `branch -D`, `checkout --force`, `rebase` detection
+- ✅ **Defense-in-Depth**: Both Validator and Executor now sanitize inputs
+
+### Performance Optimization (2025-10-09)
+- ✅ **State Refresh Debouncing**: Changed from 100ms polling to 1-second debouncing + dirty detection
+- ✅ **Reduced CPU Usage**: 90% reduction in idle `git status` calls (600/min → 60/min)
+
+### Test Coverage
+- Tests increased from 182 to 191 (126 unit + 65 integration)
+- Added 6 new dangerous operation tests
+- Added 3 new executor sanitization tests
+
 ## Future Architectural Improvements
+
+### Critical (Should Do Soon)
+- [ ] **LLM Output Validation**: Validate LLM responses before execution (security gap)
+- [ ] **Token Budget Enforcement**: Actually enforce the 5000-token limit
+- [ ] **Async Git Execution**: Move git commands off UI thread to prevent freezing
 
 ### Phase 4 (Planned)
 - [ ] **Incremental State Updates**: Only refresh changed parts of repo state
@@ -429,4 +491,4 @@ Gitalky's architecture prioritizes **transparency, safety, and user experience**
 - **Async runtime** for responsiveness
 - **Composable widgets** for reusability
 
-This architecture evolved through **3 major phases** (Specs 0001-0003), resulting in a robust foundation with **182 tests**, comprehensive **documentation**, and **performance benchmarking** infrastructure.
+This architecture evolved through **3 major phases** (Specs 0001-0003), resulting in a robust foundation with **191 tests** (126 unit + 65 integration), comprehensive **documentation**, and **performance benchmarking** infrastructure.

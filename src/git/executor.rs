@@ -43,16 +43,48 @@ impl GitExecutor {
             ));
         }
 
+        // Additional check for pipe and semicolon (should be caught by validator, but defense in depth)
+        if command.contains('|') || command.contains(';') || command.contains('&') {
+            return Err(GitError::CommandFailed(
+                "Command contains shell control characters".to_string(),
+            ));
+        }
+
         // Split command into args, respecting quotes
         let args = self.parse_command(command)?;
         if args.is_empty() {
             return Err(GitError::CommandFailed("Empty command".to_string()));
         }
 
-        // Execute git command
-        let output = Command::new("git")
-            .args(&args)
+        // Sanitize environment: remove dangerous git environment variables
+        // These can be used to execute arbitrary code via git hooks/editors/etc
+        let safe_env_vars = [
+            "PATH",
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "LANG",
+            "LC_ALL",
+            "TZ",
+            "TERM",
+            "TMPDIR",
+        ];
+
+        // Build command with sanitized environment
+        let mut cmd = Command::new("git");
+        cmd.args(&args)
             .current_dir(&self.repo_path)
+            .env_clear(); // Start with clean environment
+
+        // Re-add only safe environment variables
+        for var in &safe_env_vars {
+            if let Ok(value) = std::env::var(var) {
+                cmd.env(var, value);
+            }
+        }
+
+        // Execute git command
+        let output = cmd
             .output()
             .map_err(|e| GitError::CommandFailed(format!("Failed to execute git: {}", e)))?;
 
@@ -302,5 +334,32 @@ mod tests {
                 "--graph"
             ]
         );
+    }
+
+    #[test]
+    fn test_sanitization_pipe() {
+        let (_temp, repo_path) = create_test_repo();
+        let executor = GitExecutor::new(&repo_path);
+
+        let result = executor.execute("status | cat");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sanitization_semicolon() {
+        let (_temp, repo_path) = create_test_repo();
+        let executor = GitExecutor::new(&repo_path);
+
+        let result = executor.execute("status; ls");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sanitization_ampersand() {
+        let (_temp, repo_path) = create_test_repo();
+        let executor = GitExecutor::new(&repo_path);
+
+        let result = executor.execute("status && ls");
+        assert!(result.is_err());
     }
 }

@@ -25,6 +25,9 @@ pub enum DangerousOp {
     HardReset,
     Clean,
     FilterBranch,
+    ForceCheckout,
+    DeleteBranch,
+    Rebase,
 }
 
 #[derive(Debug, Clone)]
@@ -183,7 +186,7 @@ impl CommandValidator {
     fn detect_dangerous_ops(&self, command: &str) -> Option<DangerousOp> {
         let cmd_lower = command.to_lowercase();
 
-        // Force push
+        // Force push (must check before other -f flags)
         if cmd_lower.contains("push") && (cmd_lower.contains("--force") || cmd_lower.contains("-f"))
         {
             return Some(DangerousOp::ForcePush);
@@ -204,6 +207,21 @@ impl CommandValidator {
         // Filter-branch
         if cmd_lower.contains("filter-branch") {
             return Some(DangerousOp::FilterBranch);
+        }
+
+        // Force checkout
+        if cmd_lower.contains("checkout") && (cmd_lower.contains("--force") || cmd_lower.contains("-f")) {
+            return Some(DangerousOp::ForceCheckout);
+        }
+
+        // Delete branch (-D flag)
+        if cmd_lower.contains("branch") && cmd_lower.contains("-d") {
+            return Some(DangerousOp::DeleteBranch);
+        }
+
+        // Rebase (interactive or not)
+        if cmd_lower.contains("rebase") {
+            return Some(DangerousOp::Rebase);
         }
 
         None
@@ -415,5 +433,71 @@ mod tests {
             let result = validator.validate(cmd);
             assert!(result.is_ok(), "Command should be valid: {}", cmd);
         }
+    }
+
+    #[test]
+    fn test_force_checkout_detection() {
+        let validator = CommandValidator::new();
+        let result = validator.validate("git checkout --force main");
+        assert!(result.is_ok());
+
+        let validated = result.unwrap();
+        assert!(validated.is_dangerous);
+        assert_eq!(validated.danger_type, Some(DangerousOp::ForceCheckout));
+    }
+
+    #[test]
+    fn test_force_checkout_short_flag() {
+        let validator = CommandValidator::new();
+        let result = validator.validate("git checkout -f main");
+        assert!(result.is_ok());
+
+        let validated = result.unwrap();
+        assert!(validated.is_dangerous);
+        assert_eq!(validated.danger_type, Some(DangerousOp::ForceCheckout));
+    }
+
+    #[test]
+    fn test_delete_branch_detection() {
+        let validator = CommandValidator::new();
+        let result = validator.validate("git branch -D feature-branch");
+        assert!(result.is_ok());
+
+        let validated = result.unwrap();
+        assert!(validated.is_dangerous);
+        assert_eq!(validated.danger_type, Some(DangerousOp::DeleteBranch));
+    }
+
+    #[test]
+    fn test_delete_branch_lowercase() {
+        let validator = CommandValidator::new();
+        let result = validator.validate("git branch -d feature-branch");
+        assert!(result.is_ok());
+
+        let validated = result.unwrap();
+        assert!(validated.is_dangerous);
+        assert_eq!(validated.danger_type, Some(DangerousOp::DeleteBranch));
+    }
+
+    #[test]
+    fn test_rebase_detection() {
+        let validator = CommandValidator::new();
+        let result = validator.validate("git rebase main");
+        assert!(result.is_ok());
+
+        let validated = result.unwrap();
+        assert!(validated.is_dangerous);
+        assert_eq!(validated.danger_type, Some(DangerousOp::Rebase));
+    }
+
+    #[test]
+    fn test_rebase_interactive_detection() {
+        let validator = CommandValidator::new();
+        let result = validator.validate("git rebase -i HEAD~3");
+        assert!(result.is_ok());
+
+        let validated = result.unwrap();
+        assert!(validated.is_dangerous);
+        assert_eq!(validated.danger_type, Some(DangerousOp::Rebase));
     }
 }
