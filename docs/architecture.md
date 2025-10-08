@@ -195,8 +195,8 @@ enum AppMode {
 
 **Validation Layers**:
 1. **Sanitization** (Executor): Remove shell metacharacters (`;`, `|`, `&`, `$()`, `` ` ``)
-2. **Environment Sanitization** (Executor): Remove dangerous git env vars (e.g., `GIT_SSH_COMMAND`)
-3. **Validation** (Validator): Check against allowlist of git subcommands
+2. **Environment Sanitization** (Executor): Remove dangerous git env vars via `env_clear()`, then re-add safe ones (PATH, HOME, USER, LOGNAME, LANG, LC_ALL, TZ, TERM, TMPDIR)
+3. **Validation** (Validator): Check against hardcoded allowlist of git subcommands (not user-configurable)
 4. **Dangerous Operation Detection** (Validator): Identify destructive commands
 5. **User Confirmation**: Require explicit confirmation for dangerous ops
 6. **Audit Logging**: Log all executed commands (if enabled)
@@ -259,11 +259,11 @@ pub enum QueryType {
 3. Build escalated context for QueryType (~2000 tokens): detailed info
 4. ~~Enforce 5000 token budget (truncate if needed)~~ **⚠️ NOT IMPLEMENTED**
 5. Send context + query to LLM
-6. Receive git command **⚠️ WITHOUT VALIDATION**
+6. Receive git command **⚠️ WITHOUT SANITY CHECKING** (basic validation happens in Validator layer)
 
 **Rationale**:
 - **Accuracy**: LLM has repo state, makes better suggestions
-- **Token Efficiency**: Only send relevant context (escalation)
+- **Token Efficiency**: Attempt to send only relevant context (escalation strategy per QueryType)
 - **Cost Control**: ~~Hard limit on token usage~~ **⚠️ NO ACTUAL BUDGET ENFORCEMENT**
 - **Performance**: Minimal context = faster responses
 
@@ -304,7 +304,7 @@ async fn main() -> io::Result<()> {
 **Synchronous Operations**:
 - Git command execution (via `std::process::Command`) **⚠️ BLOCKS UI THREAD**
 - UI rendering (immediate)
-- File I/O (config, audit logs)
+- File I/O (config, audit logs) **⚠️ COULD BLOCK ON SLOW/FULL FILESYSTEM**
 - Repository state refresh (via `git status`) **⚠️ CAN TAKE 100ms-1s ON LARGE REPOS**
 
 **Known Limitations**:
@@ -359,13 +359,13 @@ show_raw_errors = false
 **First-Run Experience**:
 1. Detect no config → run wizard
 2. Prompt for LLM provider
-3. Prompt for API key (with validation)
+3. Prompt for API key (validation requires network access to test API)
 4. Save to `~/.config/gitalky/config.toml`
 5. Start app
 
 **Rationale**:
 - **User-Friendly**: No manual config file editing
-- **Validation**: API key tested before saving
+- **Validation**: API key tested via actual API call before saving
 - **Flexibility**: Users can edit TOML manually later
 - **Portability**: XDG-compliant config location
 
@@ -461,13 +461,13 @@ Following critical review of the architecture, several security and performance 
 
 ## Key Architecture Principles
 
-1. **Transparency**: Always show what will execute before running it
-2. **Safety**: Multi-layer validation, explicit confirmation for dangerous ops
-3. **Modularity**: Clear boundaries between git/llm/ui/security layers
-4. **Testability**: Core logic separated from UI for unit testing
-5. **Graceful Degradation**: Offline mode provides full git functionality
-6. **Error Clarity**: User-friendly messages with option to see technical details
-7. **Performance**: Sub-second git operations, token-efficient LLM calls
+1. **Transparency**: Always show what will execute before running it ✅
+2. **Safety**: Multi-layer validation, explicit confirmation for dangerous ops ✅
+3. **Modularity**: Clear boundaries between git/llm/ui/security layers ✅
+4. **Testability**: Core logic separated from UI for unit testing ✅
+5. **Graceful Degradation**: Offline mode provides full git functionality ✅
+6. **Error Clarity**: User-friendly messages with option to see technical details ✅
+7. **Performance**: ⚠️ Sub-second git operations (not always true on large repos), token-efficient LLM calls (estimates only, no enforcement)
 
 ## References
 
