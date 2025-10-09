@@ -86,6 +86,13 @@ fn test_validator_rejects_dangerous_flags() {
     // --exec flag
     let result = validator.validate("git --exec=whoami status");
     assert!(result.is_err());
+
+    // -C flag for directory traversal
+    let result = validator.validate("git -C /etc status");
+    assert!(result.is_err());
+
+    let result = validator.validate("git -C /root add .");
+    assert!(result.is_err());
 }
 
 #[test]

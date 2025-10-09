@@ -1,5 +1,6 @@
 use crate::llm::client::{GitCommand, LLMClient, LLMError};
 use crate::llm::context::ContextBuilder;
+use crate::security::ALLOWED_GIT_SUBCOMMANDS;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -82,15 +83,8 @@ impl Translator {
         let starts_with_git = trimmed.starts_with("git ");
         let first_word = trimmed.split_whitespace().next().unwrap_or("");
 
-        // List of common git subcommands (same as validator allowlist)
-        let git_subcommands = [
-            "status", "log", "show", "diff", "branch", "tag", "remote", "reflog",
-            "blame", "describe", "add", "commit", "checkout", "switch", "restore",
-            "reset", "revert", "merge", "rebase", "cherry-pick", "stash", "clean",
-            "push", "pull", "fetch", "clone", "config", "filter-branch",
-        ];
-
-        let looks_like_git = starts_with_git || git_subcommands.contains(&first_word);
+        // Use shared allowlist from security module (same as validator)
+        let looks_like_git = starts_with_git || ALLOWED_GIT_SUBCOMMANDS.contains(&first_word);
 
         if !looks_like_git {
             return Err(TranslationError::InvalidOutput(

@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use thiserror::Error;
+use crate::security::ALLOWED_GIT_SUBCOMMANDS;
 
 #[derive(Debug, Error)]
 pub enum ValidationError {
@@ -44,25 +45,13 @@ pub struct CommandValidator {
 
 impl CommandValidator {
     pub fn new() -> Self {
-        let allowed_subcommands = [
-            // Read operations
-            "status", "log", "show", "diff", "branch", "tag", "remote", "reflog",
-            "blame", "describe",
-            // Write operations
-            "add", "commit", "checkout", "switch", "restore", "reset", "revert",
-            "merge", "rebase", "cherry-pick", "stash", "clean",
-            // Remote operations
-            "push", "pull", "fetch", "clone",
-            // Configuration (repo-level only)
-            "config",
-            // Dangerous operations (require confirmation)
-            "filter-branch",
-        ]
-        .iter()
-        .copied()
-        .collect();
+        // Use shared allowlist from security module
+        let allowed_subcommands = ALLOWED_GIT_SUBCOMMANDS
+            .iter()
+            .copied()
+            .collect();
 
-        let dangerous_flags = ["--exec", "core.sshCommand"]
+        let dangerous_flags = ["--exec", "core.sshCommand", "-C"]
             .iter()
             .copied()
             .collect();
@@ -171,6 +160,11 @@ impl CommandValidator {
         // Check for -c flag which can set arbitrary git config
         if command.contains(" -c ") || command.starts_with("-c ") {
             return Err(ValidationError::DangerousFlags("-c".to_string()));
+        }
+
+        // Check for -C flag which can run git in arbitrary directories
+        if command.contains(" -C ") || command.starts_with("-C ") {
+            return Err(ValidationError::DangerousFlags("-C".to_string()));
         }
 
         // Check for other dangerous flags
@@ -330,6 +324,27 @@ mod tests {
             result.unwrap_err(),
             ValidationError::DangerousFlags(_)
         ));
+    }
+
+    #[test]
+    fn test_dangerous_flag_c_directory() {
+        let validator = CommandValidator::new();
+
+        // Test -C with space
+        let result = validator.validate("git -C /etc status");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ValidationError::DangerousFlags(_)
+        ));
+
+        // Test -C at start
+        let result2 = validator.validate("-C /tmp git status");
+        assert!(result2.is_err());
+
+        // Test git -C with sensitive path
+        let result3 = validator.validate("git -C /root status");
+        assert!(result3.is_err());
     }
 
     #[test]
