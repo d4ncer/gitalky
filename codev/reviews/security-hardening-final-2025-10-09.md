@@ -1,10 +1,19 @@
 # Review: Security Hardening Final Phase - Technical Debt & Nice-to-Haves
 
 **Date**: 2025-10-09 (Continuation)
-**Status**: ✅ Complete
-**Duration**: ~2 hours
-**Commits**: 3 commits
+**Status**: ✅ Complete (Updated after grumpy engineer review)
+**Duration**: ~2.5 hours
+**Commits**: 4 commits (3 feature + 1 fix from code review)
 **Test Growth**: 217 → 230 tests (+13 tests, 6.0% growth)
+
+## Update (Post-Review):
+Following grumpy staff engineer review, addressed:
+- Fixed `-C` flag detection to catch `-C/path` variant (no space)
+- Removed redundant `-C` check in dangerous_flags HashSet
+- Renamed misleading test `test_rate_limiting_window_expiry` to `test_rate_limiting_basic_flow`
+- Clarified opt-in nature of validation logging
+- Removed vague cost claims
+- Commit: `e89ad8d`
 
 ## Executive Summary
 
@@ -300,7 +309,7 @@ Implemented client-side rate limiting using sliding window algorithm: **10 reque
 **Tests Added:**
 - `test_rate_limiting_allows_initial_requests` - Verifies first 10 requests succeed
 - `test_rate_limiting_blocks_excess_requests` - Verifies 11th request is blocked with `LLMError::RateLimitExceeded`
-- `test_rate_limiting_window_expiry` - Verifies old requests are purged from sliding window
+- `test_rate_limiting_basic_flow` - Basic sanity test for rate limiting flow (Note: doesn't test actual 60-second window expiry due to test performance)
 
 **How It Works:**
 1. Before each API call, check if we've made 10+ requests in the last 60 seconds
@@ -308,14 +317,16 @@ Implemented client-side rate limiting using sliding window algorithm: **10 reque
 3. If no: Record timestamp and allow request
 4. Automatically purge timestamps older than 60 seconds (sliding window)
 
-**Result**: All 227 tests pass, API costs are controlled
+**Result**: All tests pass, API costs are controlled
 
 **Benefits:**
-- ✅ Prevents API cost abuse (max 10 req/min = max $X/hour)
+- ✅ Prevents API cost abuse (max 10 requests/minute)
 - ✅ Client-side limiting prevents hitting Anthropic's rate limits
 - ✅ Returns friendly error with wait time instead of failing silently
 - ✅ Thread-safe via Mutex
 - ✅ Efficient: O(n) where n ≤ 10
+
+**Note**: Actual cost savings depend on Anthropic's pricing model. The rate limit provides a predictable upper bound on request volume.
 
 **Commit**: `53fcce0` - "feat: Add LLM rate limiting for cost control"
 
@@ -421,15 +432,17 @@ Extended audit logging to capture validation failures with dedicated format and 
 - `test_log_validation_failure_shell_injection` - Shell injection attempt logging
 - `test_validation_failure_logging` (translator) - End-to-end integration test
 
-**Result**: All 230 tests pass, complete forensic trail for security events
+**Result**: All 230 tests pass, forensic trail available when configured
 
 **Benefits:**
-- ✅ Forensic trail for security incidents
+- ✅ Forensic trail for security incidents (when audit logger is configured)
 - ✅ Detect attack patterns (repeated injection attempts)
 - ✅ Monitor LLM behavior (hallucinations, instruction-following failures)
 - ✅ Debug false positives (legitimate commands incorrectly rejected)
 - ✅ Optional/opt-in (doesn't affect existing translator usage)
 - ✅ Thread-safe via Arc<AuditLogger>
+
+**Note**: Validation logging is opt-in via `with_audit_logger()`. Requires explicit configuration to enable.
 
 **Forensic Use Cases:**
 1. **Security Audit**: Search for `VALIDATION-REJECTED` to find all rejected commands
