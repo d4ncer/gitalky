@@ -1,6 +1,8 @@
+use crate::audit::AuditLogger;
 use crate::llm::client::{GitCommand, LLMClient, LLMError};
 use crate::llm::context::ContextBuilder;
 use crate::security::ALLOWED_GIT_SUBCOMMANDS;
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -18,6 +20,7 @@ pub enum TranslationError {
 pub struct Translator {
     client: Box<dyn LLMClient>,
     context_builder: ContextBuilder,
+    audit_logger: Option<Arc<AuditLogger>>,
 }
 
 impl Translator {
@@ -25,6 +28,20 @@ impl Translator {
         Self {
             client,
             context_builder,
+            audit_logger: None,
+        }
+    }
+
+    /// Create a new Translator with audit logging enabled
+    pub fn with_audit_logger(
+        client: Box<dyn LLMClient>,
+        context_builder: ContextBuilder,
+        audit_logger: Arc<AuditLogger>,
+    ) -> Self {
+        Self {
+            client,
+            context_builder,
+            audit_logger: Some(audit_logger),
         }
     }
 
@@ -39,7 +56,19 @@ impl Translator {
         let command = self.client.translate(query, &context).await?;
 
         // Validate LLM output before returning
-        Self::validate_llm_output(&command.command)?;
+        if let Err(e) = Self::validate_llm_output(&command.command) {
+            // Log validation failure if audit logger is available
+            if let Some(logger) = &self.audit_logger {
+                let repo_path = self.context_builder.repo_path();
+                let _ = logger.log_validation_failure(
+                    query,
+                    &command.command,
+                    &e.to_string(),
+                    repo_path,
+                );
+            }
+            return Err(e);
+        }
 
         Ok(command)
     }
@@ -297,6 +326,40 @@ mod tests {
 
             let result = translator.translate("show me the status").await;
             assert!(result.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_validation_failure_logging() {
+        use crate::audit::AuditLogger;
+        use crate::git::Repository;
+        use std::fs;
+        use std::sync::Arc;
+        use tempfile::TempDir;
+
+        if let Ok(repo) = Repository::discover() {
+            let temp_dir = TempDir::new().unwrap();
+            let log_path = temp_dir.path().join("audit.log");
+
+            let logger = Arc::new(AuditLogger::with_path(&log_path).unwrap());
+
+            let mock_client = Box::new(MockLLMClient {
+                response: "rm -rf /".to_string(),
+            });
+
+            let context_builder = ContextBuilder::new(repo);
+            let translator = Translator::with_audit_logger(mock_client, context_builder, logger);
+
+            // This should fail validation and log the failure
+            let result = translator.translate("delete everything").await;
+            assert!(result.is_err());
+
+            // Verify validation failure was logged
+            let log_content = fs::read_to_string(&log_path).unwrap();
+            assert!(log_content.contains("VALIDATION-REJECTED"));
+            assert!(log_content.contains("delete everything"));
+            assert!(log_content.contains("rm -rf /"));
+            assert!(log_content.contains("doesn't look like a git command"));
         }
     }
 }

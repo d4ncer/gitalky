@@ -78,6 +78,40 @@ impl AuditLogger {
         Ok(())
     }
 
+    /// Log a validation failure for forensics
+    ///
+    /// Records when LLM output or user input fails validation checks.
+    /// This helps detect attack patterns and LLM misbehavior.
+    pub fn log_validation_failure(
+        &self,
+        query: &str,
+        llm_output: &str,
+        reason: &str,
+        repo_path: &Path,
+    ) -> std::io::Result<()> {
+        // Check and rotate log if needed
+        self.rotate_if_needed()?;
+
+        let timestamp = Utc::now().to_rfc3339();
+        let user = std::env::var("USER").unwrap_or_else(|_| "unknown".to_string());
+        let repo_path_str = repo_path.display();
+
+        let log_entry = format!(
+            "[{}] [{}] [{}] [VALIDATION-REJECTED] query=\"{}\" llm_output=\"{}\" reason=\"{}\"\n",
+            timestamp, user, repo_path_str, query, llm_output, reason
+        );
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.log_path)?;
+
+        file.write_all(log_entry.as_bytes())?;
+        file.flush()?;
+
+        Ok(())
+    }
+
     /// Rotate log file if it exceeds MAX_LOG_SIZE
     fn rotate_if_needed(&self) -> std::io::Result<()> {
         if !self.log_path.exists() {
@@ -198,5 +232,52 @@ mod tests {
         let content = fs::read_to_string(&log_path).unwrap();
         assert!(content.contains("exit:128"));
         assert!(content.contains("git invalid-command"));
+    }
+
+    #[test]
+    fn test_log_validation_failure() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("test.log");
+
+        let logger = AuditLogger::with_path(&log_path).unwrap();
+        let repo_path = Path::new("/test/repo");
+
+        logger
+            .log_validation_failure(
+                "show me the status",
+                "rm -rf /",
+                "LLM output doesn't look like a git command",
+                repo_path,
+            )
+            .unwrap();
+
+        let content = fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("VALIDATION-REJECTED"));
+        assert!(content.contains("show me the status"));
+        assert!(content.contains("rm -rf /"));
+        assert!(content.contains("doesn't look like a git command"));
+    }
+
+    #[test]
+    fn test_log_validation_failure_shell_injection() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("test.log");
+
+        let logger = AuditLogger::with_path(&log_path).unwrap();
+        let repo_path = Path::new("/test/repo");
+
+        logger
+            .log_validation_failure(
+                "check status",
+                "git status; rm -rf /",
+                "LLM output contains shell metacharacter ';'",
+                repo_path,
+            )
+            .unwrap();
+
+        let content = fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("VALIDATION-REJECTED"));
+        assert!(content.contains("git status; rm -rf /"));
+        assert!(content.contains("shell metacharacter"));
     }
 }

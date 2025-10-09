@@ -30,6 +30,11 @@ impl ContextBuilder {
         Self { repo }
     }
 
+    /// Get the repository path
+    pub fn repo_path(&self) -> &std::path::Path {
+        self.repo.path()
+    }
+
     /// Build default context (~500 tokens)
     pub fn build_default_context(&self) -> GitResult<RepoContext> {
         let state = self.repo.state()?;
