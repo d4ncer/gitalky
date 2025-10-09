@@ -51,7 +51,7 @@ impl CommandValidator {
             .copied()
             .collect();
 
-        let dangerous_flags = ["--exec", "core.sshCommand", "-C"]
+        let dangerous_flags = ["--exec", "core.sshCommand"]
             .iter()
             .copied()
             .collect();
@@ -158,12 +158,14 @@ impl CommandValidator {
     /// Check for dangerous flags that could enable arbitrary code execution
     fn check_dangerous_flags(&self, command: &str) -> Result<(), ValidationError> {
         // Check for -c flag which can set arbitrary git config
-        if command.contains(" -c ") || command.starts_with("-c ") {
+        // Must check both " -c " and "-c " (at start) and "-c=" and "-cVALUE"
+        if command.contains(" -c") || command.starts_with("-c") {
             return Err(ValidationError::DangerousFlags("-c".to_string()));
         }
 
         // Check for -C flag which can run git in arbitrary directories
-        if command.contains(" -C ") || command.starts_with("-C ") {
+        // Must catch: " -C ", "-C ", "-C/path", " -C/path"
+        if command.contains(" -C") || command.starts_with("-C") {
             return Err(ValidationError::DangerousFlags("-C".to_string()));
         }
 
@@ -345,6 +347,14 @@ mod tests {
         // Test git -C with sensitive path
         let result3 = validator.validate("git -C /root status");
         assert!(result3.is_err());
+
+        // Test -C without space (e.g., -C/path)
+        let result4 = validator.validate("git -C/etc status");
+        assert!(result4.is_err());
+
+        // Test -C without space at start
+        let result5 = validator.validate("-C/root git status");
+        assert!(result5.is_err());
     }
 
     #[test]

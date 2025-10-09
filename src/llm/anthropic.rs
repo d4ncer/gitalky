@@ -328,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rate_limiting_window_expiry() {
+    fn test_rate_limiting_basic_flow() {
         use std::thread;
 
         let client = AnthropicClient::new("test-key".to_string());
@@ -336,9 +336,7 @@ mod tests {
         // Make 1 request
         client.check_rate_limit().unwrap();
 
-        // Wait for 1 second (requests older than 60s are removed)
-        // Note: This test doesn't wait the full minute for CI performance
-        // In production, requests older than 60s would be purged
+        // Wait a bit
         thread::sleep(Duration::from_millis(100));
 
         // Should still be able to make requests (we haven't hit the limit)
