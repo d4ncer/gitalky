@@ -228,8 +228,8 @@ user_input (or LLM output)
 - ✅ **Comprehensive Dangerous Op Detection**: All major destructive operations covered
 
 **Security Gaps**:
-- ⚠️ **No LLM Output Validation**: Assumes LLM returns sensible commands (could be gibberish)
-- ⚠️ **Command Injection via Flags**: Doesn't validate all flag combinations (e.g., `--upload-pack`)
+- ✅ ~~**No LLM Output Validation**~~ **FIXED (2025-10-09)**: 7 validation checks prevent gibberish/injection
+- ⚠️ **Command Injection via Flags**: Doesn't validate all flag combinations (e.g., `--upload-pack`, `-C`)
 
 **Rationale**:
 - **Safety**: Prevents accidental data loss
@@ -269,8 +269,8 @@ pub enum QueryType {
 
 **Known Limitations**:
 - ⚠️ **No token budget enforcement**: Code estimates tokens but doesn't enforce limits
-- ⚠️ **No LLM output validation**: Assumes LLM always returns valid git commands
-- ⚠️ **No hallucination detection**: Could accept invalid commands from LLM
+- ✅ **LLM output validation**: IMPLEMENTED (2025-10-09) - 7 validation checks in translator.rs
+- ✅ **Hallucination detection**: IMPLEMENTED (2025-10-09) - Rejects explanation text and non-git commands
 
 **Example Escalation**:
 - Query: "commit my changes" → QueryType::Commit
@@ -394,14 +394,14 @@ show_raw_errors = false
 
 #### LLM Integration
 6. **No Token Budget Enforcement**: Code estimates tokens but doesn't actually enforce limits
-7. **No LLM Output Validation**: Assumes LLM always returns valid git commands (no sanity checking)
+7. ✅ **LLM Output Validation**: IMPLEMENTED (2025-10-09) - 7 validation checks (length, newlines, shell metacharacters, git command validation, explanation detection)
 8. **LLM Latency**: 1-3 second delay for translation (shows "Translating..." state)
 9. **Token Costs**: LLM usage incurs API costs
 
 #### Security
 10. ✅ **Command Validation**: Multi-layer validation with allowlist + dangerous operation detection
 11. ✅ **Environment Sanitization**: Removes dangerous git environment variables
-12. ⚠️ **No LLM Hallucination Detection**: Could accept nonsensical commands from LLM if they pass syntax validation
+12. ✅ **LLM Hallucination Detection**: IMPLEMENTED (2025-10-09) - Rejects explanation text, shell metacharacters, non-git commands
 
 ## Design Patterns Used
 
@@ -428,26 +428,30 @@ show_raw_errors = false
 Following critical review of the architecture, several security and performance issues were addressed:
 
 ### Security Hardening (2025-10-09)
+- ✅ **LLM Output Validation**: Added 7 validation checks to prevent hallucinations and injection attacks
 - ✅ **Environment Variable Sanitization**: Executor now uses `env_clear()` and only re-adds safe vars
 - ✅ **Command Parsing Security**: Uses `Vec<String>` args instead of shell execution
 - ✅ **Extended Dangerous Op Detection**: Added `branch -D`, `checkout --force`, `rebase` detection
-- ✅ **Defense-in-Depth**: Both Validator and Executor now sanitize inputs
+- ✅ **Defense-in-Depth**: 3-layer security (LLM validation → Validator → Executor)
 
 ### Performance Optimization (2025-10-09)
 - ✅ **State Refresh Debouncing**: Changed from 100ms polling to 1-second debouncing + dirty detection
 - ✅ **Reduced CPU Usage**: 90% reduction in idle `git status` calls (600/min → 60/min)
 
 ### Test Coverage
-- Tests increased from 182 to 191 (126 unit + 65 integration)
+- Tests increased from 182 to 217 (139 unit + 78 integration)
+- Added 13 new LLM validation tests
+- Added 13 new security integration tests
 - Added 6 new dangerous operation tests
 - Added 3 new executor sanitization tests
 
 ## Future Architectural Improvements
 
 ### Critical (Should Do Soon)
-- [ ] **LLM Output Validation**: Validate LLM responses before execution (security gap)
+- ✅ ~~**LLM Output Validation**~~ **COMPLETED (2025-10-09)**: 7 validation checks in translator.rs
 - [ ] **Token Budget Enforcement**: Actually enforce the 5000-token limit
 - [ ] **Async Git Execution**: Move git commands off UI thread to prevent freezing
+- [ ] **Shared Allowlist Constant**: Extract git subcommand allowlist to prevent duplication between validator and LLM validation
 
 ### Phase 4 (Planned)
 - [ ] **Incremental State Updates**: Only refresh changed parts of repo state
@@ -491,4 +495,4 @@ Gitalky's architecture prioritizes **transparency, safety, and user experience**
 - **Async runtime** for responsiveness
 - **Composable widgets** for reusability
 
-This architecture evolved through **3 major phases** (Specs 0001-0003), resulting in a robust foundation with **191 tests** (126 unit + 65 integration), comprehensive **documentation**, and **performance benchmarking** infrastructure.
+This architecture evolved through **3 major phases** (Specs 0001-0003), resulting in a robust foundation with **217 tests** (139 unit + 78 integration), comprehensive **documentation**, and **performance benchmarking** infrastructure.
