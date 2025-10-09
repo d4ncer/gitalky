@@ -391,6 +391,7 @@ show_raw_errors = false
 #### Performance
 4. **Git Blocks UI Thread**: Long-running git commands (e.g., `git log` on large repos) freeze UI
 5. ✅ **State Refresh Optimized**: Now uses 1-second debouncing + dirty detection (previously refreshed every 100ms)
+6. **Quote Parser Limitations**: Executor's custom quote parser doesn't support escape sequences (`\"`, `\'`) - this is acceptable because git commands rarely need them and security is prioritized
 
 #### LLM Integration
 6. **No Token Budget Enforcement**: Code estimates tokens but doesn't actually enforce limits

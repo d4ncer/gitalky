@@ -92,6 +92,32 @@ impl GitExecutor {
     }
 
     /// Parse command string respecting single and double quotes
+    ///
+    /// # Limitations
+    ///
+    /// This parser does NOT support:
+    /// - Escape sequences (`\"` or `\'`) - quotes must be balanced, not escaped
+    /// - Nested quotes of the same type
+    /// - ANSI-C quoting (`$'...'`)
+    /// - Unicode escape sequences
+    ///
+    /// These limitations are acceptable because:
+    /// 1. Git commands rarely need escaped quotes
+    /// 2. The validator blocks complex inputs before they reach the parser
+    /// 3. Security is prioritized over expressiveness
+    ///
+    /// # Examples
+    ///
+    /// ```text
+    /// Supported:
+    ///   commit -m "test message"      → ["commit", "-m", "test message"]
+    ///   commit -m 'it works'          → ["commit", "-m", "it works"]
+    ///   commit -m "It's working"      → ["commit", "-m", "It's working"]
+    ///
+    /// NOT Supported (will fail or behave unexpectedly):
+    ///   commit -m "He said \"hi\""    → Error or unexpected parsing
+    ///   commit -m 'can\'t'            → Error (unclosed quote)
+    /// ```
     fn parse_command(&self, command: &str) -> GitResult<Vec<String>> {
         let mut args = Vec::new();
         let mut current_arg = String::new();

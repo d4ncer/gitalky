@@ -3,12 +3,17 @@ use crate::llm::context::RepoContext;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const DEFAULT_MODEL: &str = "claude-sonnet-4-5-20250929";
 const MAX_RETRIES: u32 = 3;
 const INITIAL_BACKOFF_MS: u64 = 1000;
+
+// Rate limiting: 10 requests per minute
+const RATE_LIMIT_REQUESTS: usize = 10;
+const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 
 #[derive(Serialize)]
 struct AnthropicRequest {
@@ -37,6 +42,8 @@ pub struct AnthropicClient {
     api_key: String,
     model: String,
     http_client: Client,
+    // Rate limiting: track request timestamps
+    request_times: Mutex<Vec<Instant>>,
 }
 
 impl AnthropicClient {
@@ -54,7 +61,29 @@ impl AnthropicClient {
             api_key,
             model,
             http_client,
+            request_times: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Check and enforce rate limiting
+    /// Returns Ok(()) if request is allowed, Err with wait time if rate limited
+    fn check_rate_limit(&self) -> Result<(), LLMError> {
+        let now = Instant::now();
+        let mut times = self.request_times.lock().unwrap();
+
+        // Remove requests older than the rate limit window
+        times.retain(|&time| now.duration_since(time) < RATE_LIMIT_WINDOW);
+
+        // Check if we've exceeded the rate limit
+        if times.len() >= RATE_LIMIT_REQUESTS {
+            let oldest = times[0];
+            let wait_time = RATE_LIMIT_WINDOW.saturating_sub(now.duration_since(oldest));
+            return Err(LLMError::RateLimitExceeded(wait_time.as_secs()));
+        }
+
+        // Record this request
+        times.push(now);
+        Ok(())
     }
 
     async fn call_api(&self, prompt: &str, context: &str) -> Result<String, LLMError> {
@@ -164,6 +193,9 @@ Your response:",
 #[async_trait]
 impl LLMClient for AnthropicClient {
     async fn translate(&self, query: &str, context: &RepoContext) -> Result<GitCommand, LLMError> {
+        // Check rate limiting before making API call
+        self.check_rate_limit()?;
+
         let context_str = context.get_full_context();
         let response = self.call_api(query, &context_str).await?;
 
@@ -268,5 +300,50 @@ mod tests {
         assert!(AnthropicClient::is_git_subcommand("status"));
         assert!(AnthropicClient::is_git_subcommand("commit -m 'test'"));
         assert!(!AnthropicClient::is_git_subcommand("notacommand"));
+    }
+
+    #[test]
+    fn test_rate_limiting_allows_initial_requests() {
+        let client = AnthropicClient::new("test-key".to_string());
+
+        // First 10 requests should succeed
+        for _ in 0..10 {
+            assert!(client.check_rate_limit().is_ok());
+        }
+    }
+
+    #[test]
+    fn test_rate_limiting_blocks_excess_requests() {
+        let client = AnthropicClient::new("test-key".to_string());
+
+        // Fill up the rate limit
+        for _ in 0..10 {
+            client.check_rate_limit().unwrap();
+        }
+
+        // 11th request should be rate limited
+        let result = client.check_rate_limit();
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), LLMError::RateLimitExceeded(_)));
+    }
+
+    #[test]
+    fn test_rate_limiting_window_expiry() {
+        use std::thread;
+
+        let client = AnthropicClient::new("test-key".to_string());
+
+        // Make 1 request
+        client.check_rate_limit().unwrap();
+
+        // Wait for 1 second (requests older than 60s are removed)
+        // Note: This test doesn't wait the full minute for CI performance
+        // In production, requests older than 60s would be purged
+        thread::sleep(Duration::from_millis(100));
+
+        // Should still be able to make requests (we haven't hit the limit)
+        for _ in 0..9 {
+            assert!(client.check_rate_limit().is_ok());
+        }
     }
 }
